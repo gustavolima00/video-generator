@@ -8,6 +8,17 @@ class LLMProviderConfig(BaseYAMLModel):
     model: str = "gemma3:12b"
     temperature: Optional[float] = None
     max_tokens: Optional[int] = None
+    reasoning_effort: Optional[Literal["none", "minimal", "low", "medium", "high"]] = (
+        Field(
+            None,
+            title=(
+                "Reasoning effort for reasoning-capable models (openrouter only). "
+                "'none' disables reasoning where the model supports it. Reasoning "
+                "tokens are billed as completion tokens, so keep this low for "
+                "creative-writing tasks."
+            ),
+        )
+    )
     base_url: Optional[str] = Field(None, exclude=True)
     api_key: Optional[str] = Field(None, exclude=True)
 

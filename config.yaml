@@ -32,6 +32,12 @@ proxies:
     provider_config:
       provider: openrouter
       model: moonshotai/kimi-k2.6
+      # 'high' chosen by ear (2026-07-29 audio review): tighter, punchier
+      # scripts. Tradeoff seen in the shootout: it condenses harder, so
+      # drop to 'low' if stories start losing important details.
+      # max_tokens bounds runaway runs.
+      reasoning_effort: high
+      max_tokens: 12000
   speech_config:
     type: edge-tts
     default_rate: 1.3
@@ -43,9 +49,10 @@ services:
     font_path: default_font.ttf
   video_config:
     call_to_action_path: assets/call_to_action.png
-    # Cover (title + "Parte N.") overlays the first seconds of the story while it
-    # is already narrated — the title is not narrated. Keep it short.
-    cover_duration: 3
+    # Cover is a brief profile "blink" at the very start while the story is
+    # already narrated and the subtitle runs from the beginning. Keep it
+    # very short (sub-second).
+    cover_duration: 0.5
     youtube_channel_url: https://www.youtube.com/@FoodieBoyKR
     youtube_channel_urls:
       - https://www.youtube.com/@FoodieBoyKR
@@ -72,11 +79,10 @@ bots:
     low_quality: false
     daily_hour_utc: 9
     daily_minute_utc: 30
-    daily_auto_publish_count: 4
+    daily_auto_publish_count: 3
     publish_slots_local:
       - "12:00"
       - "18:00"
-      - "19:00"
       - "20:00"
     publish_min_lead_minutes: 30
     publish_hashtags: []

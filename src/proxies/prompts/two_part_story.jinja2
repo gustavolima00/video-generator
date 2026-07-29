@@ -6,7 +6,7 @@ Take the provided original Reddit post and transform it into a 2-part engaging T
 2. Write a title in {{ target_language }} that is the strongest hook of the whole video. It is shown on the cover image and read by the viewer — it is NOT narrated — and it is what decides whether they keep watching. A hook works when the viewer feels the stakes right away: it centers on a concrete harm or injustice done to someone worth rooting for, and it makes the antagonist or the unfairness clear, so the viewer wants to stay and see the turnaround or the justice. Imply that a turn is coming, but do not reveal how it ends — the payoff belongs in the story, not in the title, so never give away the outcome. Keep a natural spoken voice, as if you were telling a friend the one detail that would make them stop scrolling, and get straight to the point instead of warming up. When the story genuinely offers a short, outrageous line that someone actually said, quoting it can make a great hook — but only use it when the story really provides one. The title must promise something the story actually delivers; it is a real promise, not a misleading tease.
 3. Use natural, colloquial {{ target_language }}. Prefer everyday words people actually use in casual speech.
 4. When the original post uses single letters (like B, M, J) or initials to anonymize people, replace them with realistic fake names that fit the story context (e.g., "B(28m)" becomes "Bruno, que tinha 28 anos na época").
-5. Do NOT narrate the title or any "Parte 1."/"Parte 2." marker — they are shown on the cover image and reading them aloud would waste the crucial first seconds. Each part's narration begins directly with the story: open on the conflict or the stakes in the very first spoken words, no preamble and no scene-setting warm-up, picking up exactly the promise the cover title made and starting to deliver on it. For example, for a cover title "Meu vizinho me perseguiu por meses", Part 1 begins: "Ele começou batendo na minha porta às três da manhã...". The opening seconds carry the same job as the title: give the viewer a reason to stay instead of scrolling away.
+5. Do NOT narrate the title or any "Parte 1."/"Parte 2." marker — they are shown on the cover image and reading them aloud would waste the crucial first seconds. Part 1's narration begins directly with the story, following the FIRST SENTENCE rules below. Part 2 resumes mid-story with the same energy, never with recap or warm-up.
 6. Part 1 must end before the climax of the story, on a moment of suspense or anticipation. The viewer should be left wondering what happens next. The climax and resolution are saved for Part 2. Part 1 MUST end with a natural {{ target_language }} call to action equivalent to "like and follow me for part 2". If {{ target_language }} is Portuguese (Brazil), use exactly: "Curta e me siga para a parte 2."
 7. Part 2 must contain the climax and resolve the story naturally. Part 2 MUST end with a story-specific engagement question in {{ target_language }} that invites the viewer to share their opinion, followed by a natural localized equivalent of "like, follow me, and leave it in the comments". If {{ target_language }} is Portuguese (Brazil), use: "Curta, me siga e deixe nos comentários". The question should relate to the story's theme or dilemma.
 8. Provide your output in a JSON format matching this structure:
@@ -18,6 +18,24 @@ Take the provided original Reddit post and transform it into a 2-part engaging T
   "part2": "<Part 2 {{ target_language }} script with the climax and resolution>"
 }
 ```
+
+# FIRST SENTENCE — THE SPOKEN HOOK (CRITICAL)
+The first spoken sentence of Part 1 decides whether the viewer scrolls away. It MUST be sensational: a shocking fact, an outrageous accusation, or the moment of peak conflict — pulled from anywhere in the story, NOT the beginning of the timeline. After this first sentence, you may rewind and tell the story in order.
+
+**Forbidden openings** (chronological/setup starts — never begin with these):
+- "Quando eu tinha X anos..." / "When I was X years old..."
+- "Tudo começou quando..." / "It all started when..."
+- "Há alguns anos..." / "A few years ago..."
+- "Eu morava com..." / "I used to live with..."
+- Introducing characters, places, or background before the conflict.
+
+**Techniques that work** (pick what fits the story):
+- Start at the climax or the aftermath, then rewind: "Ela sumiu por dez anos, apareceu do nada, e ainda me chamou de mentiroso na minha cara."
+- Open with the most outrageous line or accusation: "O cara inventou um cachorro que nunca existiu só pra me ferrar."
+- A direct shocking stake: "Eu paguei uma multa por um animal que eu nunca tive na vida."
+- Peak-emotion dialogue: "'Você prometeu que ia me esperar' — foi isso que ela me disse depois de DEZ anos sumida."
+
+The first sentence must be true to the story (no invented facts) and must respect the STRONG WORDS POLICY below.
 
 # NARRATOR GENDER
 Identify the narrator's gender from contextual clues in the post (e.g., "I (25F)", gender-specific terms). Use "male", "female", or "unknown".

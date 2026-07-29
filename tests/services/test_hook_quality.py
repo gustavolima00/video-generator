@@ -102,3 +102,62 @@ def test_part1_ends_with_cta():
         assert entry["part1"].strip().endswith(PART1_CTA), (
             f"part1 must end with the part-2 CTA '{PART1_CTA}'"
         )
+
+
+# --- Milestone 2: parallel paths (single-part + DSPy) parity -----------------
+#
+# The single-part (`story.jinja2` / `TikTokStorySignature`) and DSPy few-shot
+# paths must carry the SAME hook anatomy and the SAME frozen output contract as
+# the active two-part path (FR-013). These guards keep the parallel paths from
+# silently diverging.
+
+
+def _dspy_fewshot_viral_title(entry):
+    """Reproduce how ``DSPyLLMProxy._get_story_generator`` picks ``viral_title``.
+
+    The loader uses the explicit cover ``title`` and only falls back to the
+    English ``original_post.title`` when it is missing. Keep this in sync with
+    ``src/proxies/llm_dspy_proxy.py``.
+    """
+    post = entry.get("original_post", {})
+    return entry.get("title") or post.get("title", "")
+
+
+def test_single_part_signature_matches_contract():
+    """Single-part DSPy signature exposes exactly the contract's output fields.
+
+    Contract (`contracts/llm_story_output.md`): the single-part output maps to
+    keys ``title`` (from ``viral_title``), ``narrator_gender`` and ``script``.
+    """
+    from src.proxies.llm_dspy_proxy import TikTokStorySignature
+
+    assert set(TikTokStorySignature.output_fields.keys()) == {
+        "viral_title",
+        "narrator_gender",
+        "script",
+    }
+
+
+def test_two_part_signature_matches_contract():
+    """Two-part DSPy signature mirrors the frozen two-part output contract."""
+    from src.proxies.llm_dspy_proxy import TwoPartTikTokStorySignature
+
+    assert set(TwoPartTikTokStorySignature.output_fields.keys()) == {
+        "viral_title",
+        "narrator_gender",
+        "part1_script",
+        "part2_script",
+    }
+
+
+def test_dspy_fewshot_uses_explicit_title_without_forbidden_words():
+    """The DSPy few-shot demos use the explicit cover hook, never the English
+    original post title, and that hook carries no forbidden words."""
+    for entry in load_two_part_examples():
+        viral_title = _dspy_fewshot_viral_title(entry)
+        assert viral_title == entry["title"], (
+            "DSPy few-shot must use the explicit cover `title` as viral_title, "
+            "not fall back to the original English post title"
+        )
+        assert viral_title, "DSPy few-shot viral_title must be non-empty"
+        assert_no_forbidden_words(viral_title)

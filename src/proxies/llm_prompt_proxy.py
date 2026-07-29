@@ -183,6 +183,15 @@ class PromptLLMProxy(ILLMProxy):
             kwargs["response_format"] = {"type": "json_object"}
         if self.config.provider == "google":
             kwargs["safety_settings"] = self.GEMINI_SAFETY_SETTINGS
+        if self.config.provider == "openrouter" and self.config.reasoning_effort:
+            # Reasoning tokens are billed as completion tokens, so cap the
+            # effort for reasoning-capable models (e.g. kimi-k3). litellm
+            # forwards extra_body verbatim to the OpenRouter request JSON.
+            if self.config.reasoning_effort == "none":
+                reasoning = {"enabled": False}
+            else:
+                reasoning = {"effort": self.config.reasoning_effort}
+            kwargs["extra_body"] = {"reasoning": reasoning}
         return kwargs
 
     def _get_completion_kwargs(

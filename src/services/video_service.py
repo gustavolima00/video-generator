@@ -198,7 +198,7 @@ class VideoService:
             cover.center(width, height)
             cover_dur = intro_end if intro_end > 0 else config.cover_duration
             cover.set_duration(cover_dur)
-            cover.apply_fadeout(1)
+            cover.apply_fadeout(min(0.3, cover_dur))
             background_video.merge(cover)
 
         # --- CTA image overlay ---
@@ -239,8 +239,9 @@ class VideoService:
         """Generate a video from a timed sequence of AI-generated images.
 
         The video has three phases:
-        1. Introduction: first image is blurred with cover overlay on top.
-           At introduction_end_time the image unblurs and cover fades out.
+        1. Introduction: a brief profile "blink" — the first image is blurred
+           with the cover overlay on top for ``cover_duration`` seconds, then it
+           unblurs and the cover fades out. Subtitles run from the beginning.
         2. Story: images appear at their scheduled times filling the background.
            Ken Burns zoom + crossfade transitions between images.
         3. Call-to-action: the active image blurs and a CTA overlay appears.
@@ -261,7 +262,10 @@ class VideoService:
         audio.add_end_silence(config.end_silece_seconds)
         total_duration = audio.clip.duration
 
-        intro_end = image_story.introduction_end_time
+        # The cover is now just a brief profile "blink" at the very start. Collapse
+        # the blurred-intro window to that same short duration so the first image
+        # unblurs almost immediately and the subtitle runs from the beginning.
+        intro_end = float(config.cover_duration)
         cta_start = image_story.call_to_action_start_time
 
         segments = self._build_image_segments(
@@ -308,7 +312,7 @@ class VideoService:
             cover.center(width, height)
             cover.set_start(0)
             cover.set_duration(intro_end)
-            cover.apply_fadeout(1)
+            cover.apply_fadeout(min(0.3, intro_end))
             moviepy_clips.append(cover.clip)
 
         if self._call_to_action_bytes is not None and cta_start < total_duration:
