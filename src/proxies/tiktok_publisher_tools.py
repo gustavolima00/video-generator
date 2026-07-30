@@ -195,6 +195,13 @@ async def _eval_js(browser_session, expression: str) -> dict:
 # * Pasting "#tag" alone does not make it a real hashtag. TikTok only
 #   decorates the tag when it is chosen from the suggestion dropdown, so
 #   each hashtag is inserted separately and then clicked in the list.
+# * TikTok prefills the caption with the uploaded file's base name (e.g.
+#   "story_1"). Draft's onPaste bails out on an EMPTY string, so pasting
+#   '' over a select-all does not clear anything — the prefill survived
+#   and our caption was appended to it. Clearing therefore has to happen
+#   by pasting something non-empty OVER the selection: we drop a sentinel
+#   char, confirm Draft took it, and leave it selected so the first real
+#   chunk replaces it.
 #
 # The reliable signal that Draft accepted input is the placeholder
 # disappearing — ``innerText`` can show text Draft never registered.
@@ -242,8 +249,7 @@ _CAPTION_JS = r"""
       clipboardData: dt, bubbles: true, cancelable: true }));
   }
 
-  // Select-all + paste empty string. Deliberately not execCommand.
-  function clearAll() {
+  function selectAll() {
     const el = editor();
     el.focus();
     const range = document.createRange();
@@ -251,7 +257,37 @@ _CAPTION_JS = r"""
     const sel = window.getSelection();
     sel.removeAllRanges();
     sel.addRange(range);
-    insertPaste('');
+  }
+
+  const content = () => (editor().innerText || '').trim();
+
+  // Wipe whatever TikTok prefilled (usually the file name). Draft drops
+  // an empty paste, so we paste a sentinel over the full selection and
+  // then re-select it: the caller's first real paste replaces it.
+  // Fallback is Draft's own Backspace command via a synthetic keydown.
+  async function clearAll() {
+    const SENTINEL = '⁣'; // invisible separator: harmless if it survives
+    selectAll();
+    insertPaste(SENTINEL);
+    await sleep(300);
+    const after = content();
+    if (after === SENTINEL || after === '') {
+      // Leave the sentinel selected so the first real paste replaces it.
+      selectAll();
+      return { cleared: true, method: 'paste-replace' };
+    }
+    selectAll();
+    editor().dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'Backspace', code: 'Backspace', keyCode: 8, which: 8,
+      bubbles: true, cancelable: true }));
+    await sleep(300);
+    const left = content();
+    if (left === '') {
+      focusEnd();
+      return { cleared: true, method: 'keydown-backspace' };
+    }
+    focusEnd();
+    return { cleared: false, method: 'none', left: left };
   }
 
   const menusNow = () =>
@@ -293,11 +329,14 @@ _CAPTION_JS = r"""
     return { tag: tag, picked: true, exact: !!exact };
   }
 
-  focusEnd();
-  clearAll();
-  await sleep(400);
-
   const parts = TEXT.split(/(#[\p{L}\p{N}_]+)/u).filter((p) => p !== '');
+  if (!parts.length) return { ok: false, reason: 'no caption text to set' };
+
+  focusEnd();
+  const prefill = content();
+  const clear = await clearAll();
+  await sleep(300);
+
   const wanted = parts.filter((p) => p.startsWith('#')).length;
   const results = [];
   for (const part of parts) {
@@ -320,6 +359,9 @@ _CAPTION_JS = r"""
     ok: true,
     content: el.innerText,
     draftAccepted: !placeholderVisible(),
+    prefill: prefill,
+    cleared: clear.cleared,
+    clearMethod: clear.method,
     hashtagsWanted: wanted,
     hashtagsHighlighted: spans.length,
     highlighted: spans,
@@ -466,7 +508,9 @@ def build_tools() -> Tools:
             "Clear and set the content of a contenteditable element, "
             "hashtags included. Built for DraftJS (TikTok's caption "
             "field), which ignores `.value = ''`, Ctrl+A + Delete, and "
-            "execCommand. Plain text is inserted via a synthetic paste "
+            "execCommand. Any text TikTok prefilled (the uploaded file "
+            "name) is removed first, so the field ends up with exactly "
+            "the text you pass. Plain text is inserted via a synthetic paste "
             "event; each #hashtag in the text is inserted on its own and "
             "then chosen from TikTok's suggestion dropdown, which is what "
             "makes it render as a real (highlighted) hashtag instead of "
@@ -501,9 +545,16 @@ def build_tools() -> Tools:
                 f"set_contenteditable -> content={content!r} "
                 f"(matches expected: {matches}, "
                 f"draftAccepted: {val.get('draftAccepted')}, "
+                f"cleared: {val.get('cleared')} via {val.get('clearMethod')}, "
                 f"hashtags highlighted: {got}/{wanted})"
             )
             _logger.info(msg)
+            if not val.get("cleared"):
+                _logger.warning(
+                    "caption prefill %r was not cleared — the caption may "
+                    "still contain it",
+                    val.get("prefill"),
+                )
             if got < wanted:
                 missed = [
                     r.get("tag")

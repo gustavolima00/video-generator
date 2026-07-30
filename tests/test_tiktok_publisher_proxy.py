@@ -94,8 +94,7 @@ def test_format_description_strips_old_hashtags_and_dedupes_new_tags():
     )
 
     assert result == (
-        "Meu chefe me proibiu de decidir  "
-        "#fyp #storytime #reddit #chefeToxico #obedienciaCega"
+        "Meu chefe me proibiu de decidir  #reddit #fyp #chefeToxico"
     )
 
 

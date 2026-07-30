@@ -8,7 +8,7 @@ from collections.abc import Iterable
 import unidecode
 
 DEFAULT_HASHTAGS = ("fyp", "storytime", "reddit")
-MAX_HASHTAGS = 6
+MAX_HASHTAGS = 3
 
 _TRAILING_HASHTAGS_RE = re.compile(r"(?:\s*#[^\s#]+)+\s*$")
 
@@ -29,10 +29,15 @@ def normalize_hashtags(
     LLMs sometimes return repeated tags, tags with '#' included, or a full
     copied hashtag block. Splitting and normalizing here keeps the final
     TikTok caption compact and prevents spammy duplicated blocks.
+
+    The caller's tags come first and the generic defaults only fill the
+    leftover slots: with a cap as small as ``MAX_HASHTAGS`` the defaults
+    would otherwise consume every slot and the story-specific tags would
+    never make it into the caption.
     """
     result: list[str] = []
     seen: set[str] = set()
-    raw_tags = [*(defaults or ()), *((hashtags or ()))]
+    raw_tags = [*((hashtags or ())), *(defaults or ())]
 
     for raw_tag in raw_tags[: max_count * 4]:
         for tag in _split_hashtag_tokens(str(raw_tag)):
