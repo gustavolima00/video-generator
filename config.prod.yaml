@@ -42,7 +42,7 @@ services:
   video_config:
     call_to_action_path: assets/call_to_action.png
     # Cover is a brief profile "blink"; subtitles run from the beginning.
-    cover_duration: 0.5
+    cover_duration: 1.5
     youtube_channel_url: https://www.youtube.com/@FoodieBoyKR
     youtube_channel_urls:
       - https://www.youtube.com/@FoodieBoyKR

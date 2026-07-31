@@ -1,3 +1,4 @@
+import copy
 import io
 import logging
 import random
@@ -162,14 +163,14 @@ class VideoService:
         low_quality: bool = False,
         cover: Optional[image_clip.ImageClip] = None,
         captions: Optional[captions_clip.CaptionsClip] = None,
-        intro_end: float = 0,
         cta_start: float = 0,
     ) -> video_clip.VideoClip:
         """Generate final video with all components.
 
-        When *intro_end* is positive the cover duration matches the intro.
-        When *cta_start* is positive the configured CTA image is composited
-        at that time.
+        The cover holds the screen alone for ``cover_duration`` seconds and
+        the story only starts after it. When *cta_start* is positive the
+        configured CTA image is composited at that time (relative to the
+        narration, so it is shifted along with it).
         """
         config = self._video_config
         size_rate = 1.0
@@ -182,6 +183,17 @@ class VideoService:
                     padding=int(round(config.padding * size_rate)),
                 )
             )
+
+        # The story waits for the cover: the narration (and with it the
+        # captions and the CTA) is pushed back so nothing is spoken while
+        # the cover is still on screen.
+        lead_in = float(config.cover_duration) if cover is not None else 0.0
+        if lead_in > 0:
+            audio.add_start_silence(lead_in)
+            if captions is not None:
+                captions = self._shift_captions(captions, lead_in)
+            if cta_start > 0:
+                cta_start += lead_in
 
         audio.add_end_silence(config.end_silece_seconds)
         background_video.resize(config.width, config.height)
@@ -196,7 +208,7 @@ class VideoService:
         if cover is not None:
             cover.fit_width(width, config.padding)
             cover.center(width, height)
-            cover_dur = intro_end if intro_end > 0 else config.cover_duration
+            cover_dur = lead_in
             cover.set_duration(cover_dur)
             cover.apply_fadeout(min(0.3, cover_dur))
             background_video.merge(cover)
@@ -239,9 +251,9 @@ class VideoService:
         """Generate a video from a timed sequence of AI-generated images.
 
         The video has three phases:
-        1. Introduction: a brief profile "blink" — the first image is blurred
-           with the cover overlay on top for ``cover_duration`` seconds, then it
-           unblurs and the cover fades out. Subtitles run from the beginning.
+        1. Introduction: the cover holds the screen for ``cover_duration``
+           seconds over a blurred first image. The narration waits — it only
+           starts once the cover fades out and the image unblurs.
         2. Story: images appear at their scheduled times filling the background.
            Ken Burns zoom + crossfade transitions between images.
         3. Call-to-action: the active image blurs and a CTA overlay appears.
@@ -259,13 +271,19 @@ class VideoService:
             )
 
         width, height = config.width, config.height
+
+        # The story waits for the cover: narration, captions and the image
+        # schedule are all pushed back so the cover holds the screen alone.
+        intro_end = float(config.cover_duration) if cover is not None else 0.0
+        if intro_end > 0:
+            audio.add_start_silence(intro_end)
+            if captions is not None:
+                captions = self._shift_captions(captions, intro_end)
+            image_story = self._shift_image_story(image_story, intro_end)
+
         audio.add_end_silence(config.end_silece_seconds)
         total_duration = audio.clip.duration
 
-        # The cover is now just a brief profile "blink" at the very start. Collapse
-        # the blurred-intro window to that same short duration so the first image
-        # unblurs almost immediately and the subtitle runs from the beginning.
-        intro_end = float(config.cover_duration)
         cta_start = image_story.call_to_action_start_time
 
         segments = self._build_image_segments(
@@ -340,6 +358,39 @@ class VideoService:
             result.insert_captions(captions, size_rate=size_rate)
 
         return result
+
+    @staticmethod
+    def _shift_captions(
+        captions: captions_clip.CaptionsClip, offset: float
+    ) -> captions_clip.CaptionsClip:
+        """Return a copy of *captions* with every segment moved by *offset*.
+
+        Shallow-copied so the already-materialised font file is reused and
+        the caller's clip is left untouched.
+        """
+        shifted = copy.copy(captions)
+        shifted.captions = captions.captions.shifted(offset)
+        return shifted
+
+    @staticmethod
+    def _shift_image_story(image_story: ImageStory, offset: float) -> ImageStory:
+        """Return a copy of *image_story* with every time moved by *offset*.
+
+        The first image keeps ``start_time`` 0 — it is what the cover sits on
+        top of (blurred) while the story waits.
+        """
+        shifted = image_story.model_copy(deep=True)
+        for img in shifted.images:
+            img.start_time = round(img.start_time + offset, 3)
+        if shifted.images:
+            shifted.images[0].start_time = 0.0
+        shifted.introduction_end_time = round(
+            shifted.introduction_end_time + offset, 3
+        )
+        shifted.call_to_action_start_time = round(
+            shifted.call_to_action_start_time + offset, 3
+        )
+        return shifted
 
     @staticmethod
     def _build_image_segments(

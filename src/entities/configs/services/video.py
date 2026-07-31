@@ -61,12 +61,12 @@ class VideoConfig(BaseYAMLModel):
     end_silece_seconds: int = Field(3, title="End silence seconds")
     padding: int = Field(60, title="Padding")
     cover_duration: float = Field(
-        0.5,
+        1.5,
         title=(
-            "Cover overlay duration in seconds. The cover is now just a brief "
-            "profile 'blink' shown at the very start while the story is already "
-            "being narrated and the subtitle runs from the beginning. Keep it "
-            "very short (sub-second)."
+            "Cover duration in seconds. The cover holds the screen alone at the "
+            "start of the video and the story waits for it: narration, captions "
+            "and images only begin once it fades out, so this adds to the total "
+            "duration."
         ),
     )
     width: int = Field(1080, title="Width of the video")

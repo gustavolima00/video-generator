@@ -23,6 +23,19 @@ class Captions(BaseYAMLModel):
         ]
         return Captions(segments=new_segments)
 
+    def shifted(self, offset: float) -> "Captions":
+        """Return a new Captions with every segment moved by *offset* seconds."""
+        return Captions(
+            segments=[
+                CaptionSegment(
+                    start=segment.start + offset,
+                    end=segment.end + offset,
+                    text=segment.text,
+                )
+                for segment in self.segments
+            ]
+        )
+
     def after_time(self, t: float) -> "Captions":
         """Return a new Captions keeping only segments that start at or after *t*."""
         return Captions(

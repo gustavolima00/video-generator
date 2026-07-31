@@ -25,11 +25,27 @@ class AudioClip:
         self.clip = self.clip.with_volume_scaled(volume)
 
     def add_end_silence(self, duration_in_seconds):
-        silence = AudioArrayClip(
-            np.zeros((44100 * duration_in_seconds, 2)),
-            fps=44100,
-        )
+        silence = self._silence(duration_in_seconds)
+        if silence is None:
+            return
         self.clip = concatenate_audioclips([self.clip, silence])
+
+    def add_start_silence(self, duration_in_seconds):
+        """Push the narration back by *duration_in_seconds* of silence.
+
+        Used so the story waits for the cover instead of playing under it.
+        """
+        silence = self._silence(duration_in_seconds)
+        if silence is None:
+            return
+        self.clip = concatenate_audioclips([silence, self.clip])
+
+    @staticmethod
+    def _silence(duration_in_seconds) -> AudioArrayClip | None:
+        frames = int(round(44100 * float(duration_in_seconds)))
+        if frames <= 0:
+            return None
+        return AudioArrayClip(np.zeros((frames, 2)), fps=44100)
 
     def ajust_duration(self, duration):
         if duration > self.clip.duration:

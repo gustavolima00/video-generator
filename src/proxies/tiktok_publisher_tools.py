@@ -25,8 +25,10 @@ read it, retry differently, or call ``done(success=False)``.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
+from pathlib import Path
 from typing import Any, Optional
 
 from browser_use import ActionResult
@@ -181,8 +183,10 @@ async def _eval_js(browser_session, expression: str) -> dict:
 # Caption typing (DraftJS + hashtag suggestions)
 # ---------------------------------------------------------------------------
 #
-# Written as a JS template rather than an f-string because it is mostly
-# braces. ``__SELECTOR__`` and ``__TEXT__`` are substituted with JSON.
+# The snippet lives in ``js/tiktok_caption.js`` so the exact same code can
+# be pasted into a browser console for debugging — see
+# ``scripts/tiktok_caption_snippet.py``. ``__SELECTOR__`` and ``__TEXT__``
+# are substituted with JSON before it runs.
 #
 # Why it looks like this (all of it was measured against the live page):
 #
@@ -196,179 +200,105 @@ async def _eval_js(browser_session, expression: str) -> dict:
 #   decorates the tag when it is chosen from the suggestion dropdown, so
 #   each hashtag is inserted separately and then clicked in the list.
 # * TikTok prefills the caption with the uploaded file's base name (e.g.
-#   "story_1"). Draft's onPaste bails out on an EMPTY string, so pasting
-#   '' over a select-all does not clear anything — the prefill survived
-#   and our caption was appended to it. Clearing therefore has to happen
-#   by pasting something non-empty OVER the selection: we drop a sentinel
-#   char, confirm Draft took it, and leave it selected so the first real
-#   chunk replaces it.
+#   "story_1"). Clearing it needs BOTH of these, and each was a separate
+#   bug in an earlier version of this file:
+#     - a non-empty paste, because Draft's onPaste bails out on '' — so
+#       we paste a sentinel over the selection instead of "deleting";
+#     - a tick between selecting and pasting, because Draft tracks its
+#       own SelectionState and only syncs it from the DOM via the async
+#       selectionchange -> React onSelect path. Pasting in the same tick
+#       lands at Draft's stale caret and just APPENDS to the prefill.
+#   Synthetic keyboard events are not an option: Draft leaves plain
+#   Backspace to the browser's native contentEditable handling, and an
+#   untrusted event has no default action. When JS cannot do it, the
+#   Python side falls back to real CDP key presses.
 #
 # The reliable signal that Draft accepted input is the placeholder
 # disappearing — ``innerText`` can show text Draft never registered.
-_CAPTION_JS = r"""
-(async () => {
-  const SEL = __SELECTOR__;
-  const TEXT = __TEXT__;
-  const PLACEHOLDER = '.public-DraftEditorPlaceholder-root';
-  const MENUS = '[role="option"], [role="listbox"], [role="menu"]';
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+_CAPTION_JS = (
+    Path(__file__).parent / "js" / "tiktok_caption.js"
+).read_text(encoding="utf-8")
 
-  const editor = () => document.querySelector(SEL);
-  if (!editor()) return { ok: false, reason: 'selector did not match' };
 
-  const placeholderVisible = () => {
-    const ph = document.querySelector(PLACEHOLDER);
-    return !!(ph && ph.offsetParent);
-  };
+async def _cdp_clear_field(browser_session, selector: str) -> bool:
+    """Clear a focused field with REAL key presses (Ctrl/Cmd+A, Delete).
 
-  // Draft needs a real caret, not just focus, or the paste is dropped.
-  function focusEnd() {
-    const el = editor();
-    el.focus();
-    const range = document.createRange();
-    range.selectNodeContents(el);
-    range.collapse(false);
-    const sel = window.getSelection();
-    sel.removeAllRanges();
-    sel.addRange(range);
-  }
+    Last resort for when the JS paste-replace path cannot clear the field:
+    CDP-injected keys are trusted, so the browser performs its native
+    contentEditable deletion and Draft reconciles from the DOM afterwards.
+    """
+    sel_json = json.dumps(selector)
+    focused = await _eval_js(
+        browser_session,
+        f"(() => {{ const el = document.querySelector({sel_json}); "
+        f"if (!el) return false; el.focus(); return true; }})()",
+    )
+    if focused.get("value") is not True:
+        return False
 
-  function hasCaret() {
-    const el = editor();
-    const sel = window.getSelection();
-    return !!(el && document.activeElement === el && sel && sel.rangeCount > 0
-              && el.contains(sel.getRangeAt(0).startContainer));
-  }
+    cdp = await browser_session.get_or_create_cdp_session()
 
-  function insertPaste(text) {
-    const el = editor();
-    if (!hasCaret()) focusEnd();
-    const dt = new DataTransfer();
-    dt.setData('text/plain', text);
-    el.dispatchEvent(new ClipboardEvent('paste', {
-      clipboardData: dt, bubbles: true, cancelable: true }));
-  }
+    async def press(**params) -> None:
+        await cdp.cdp_client.send.Input.dispatchKeyEvent(
+            params=params, session_id=cdp.session_id
+        )
 
-  function selectAll() {
-    const el = editor();
-    el.focus();
-    const range = document.createRange();
-    range.selectNodeContents(el);
-    const sel = window.getSelection();
-    sel.removeAllRanges();
-    sel.addRange(range);
-  }
+    async def select_all(modifier: int) -> None:
+        # ``commands`` is what actually performs the edit: a bare Ctrl+A key
+        # event does nothing to the selection, because select-all normally
+        # comes from the browser's own shortcut handling, not the page.
+        await press(
+            type="rawKeyDown",
+            modifiers=modifier,
+            key="a",
+            code="KeyA",
+            windowsVirtualKeyCode=65,
+            nativeVirtualKeyCode=65,
+            commands=["selectAll"],
+        )
+        await press(
+            type="keyUp",
+            modifiers=modifier,
+            key="a",
+            code="KeyA",
+            windowsVirtualKeyCode=65,
+            nativeVirtualKeyCode=65,
+        )
 
-  const content = () => (editor().innerText || '').trim();
+    async def delete_selection() -> None:
+        await press(
+            type="rawKeyDown",
+            key="Delete",
+            code="Delete",
+            windowsVirtualKeyCode=46,
+            nativeVirtualKeyCode=46,
+            commands=["deleteBackward"],
+        )
+        await press(
+            type="keyUp",
+            key="Delete",
+            code="Delete",
+            windowsVirtualKeyCode=46,
+            nativeVirtualKeyCode=46,
+        )
 
-  // Wipe whatever TikTok prefilled (usually the file name). Draft drops
-  // an empty paste, so we paste a sentinel over the full selection and
-  // then re-select it: the caller's first real paste replaces it.
-  // Fallback is Draft's own Backspace command via a synthetic keydown.
-  async function clearAll() {
-    const SENTINEL = '⁣'; // invisible separator: harmless if it survives
-    selectAll();
-    insertPaste(SENTINEL);
-    await sleep(300);
-    const after = content();
-    if (after === SENTINEL || after === '') {
-      // Leave the sentinel selected so the first real paste replaces it.
-      selectAll();
-      return { cleared: true, method: 'paste-replace' };
-    }
-    selectAll();
-    editor().dispatchEvent(new KeyboardEvent('keydown', {
-      key: 'Backspace', code: 'Backspace', keyCode: 8, which: 8,
-      bubbles: true, cancelable: true }));
-    await sleep(300);
-    const left = content();
-    if (left === '') {
-      focusEnd();
-      return { cleared: true, method: 'keydown-backspace' };
-    }
-    focusEnd();
-    return { cleared: false, method: 'none', left: left };
-  }
-
-  const menusNow = () =>
-    Array.from(document.querySelectorAll(MENUS)).filter((el) => el.offsetParent);
-
-  function clickIt(item) {
-    item.scrollIntoView({ block: 'nearest' });
-    for (const type of ['mouseover', 'mousedown', 'mouseup', 'click']) {
-      item.dispatchEvent(new MouseEvent(type,
-        { bubbles: true, cancelable: true, view: window }));
-    }
-  }
-
-  // Paste "#tag", wait for the suggestion list, click the matching row.
-  // Polls rather than sleeping a fixed time — the list is a network call.
-  async function addHashtag(tag) {
-    const before = new Set(menusNow());
-    insertPaste('#' + tag);
-    let fresh = [];
-    const start = performance.now();
-    while (performance.now() - start < 4000) {
-      await sleep(250);
-      fresh = menusNow().filter((n) => !before.has(n));
-      if (fresh.length) break;
-    }
-    if (!fresh.length) {
-      // Niche/new tags may have no suggestion at all. The plain text is
-      // already in the caption; TikTok usually linkifies it on publish.
-      return { tag: tag, picked: false, reason: 'no-dropdown' };
-    }
-    const want = tag.toLowerCase();
-    const norm = (e) => (e.innerText || '').trim().toLowerCase()
-      .replace(/^#/, '').split(/\s/)[0];
-    const exact = fresh.find((e) => norm(e) === want);
-    const loose = fresh.find((e) => (e.innerText || '').toLowerCase().includes(want));
-    const item = exact || loose || fresh[0];
-    clickIt(item);
-    await sleep(700);
-    return { tag: tag, picked: true, exact: !!exact };
-  }
-
-  const parts = TEXT.split(/(#[\p{L}\p{N}_]+)/u).filter((p) => p !== '');
-  if (!parts.length) return { ok: false, reason: 'no caption text to set' };
-
-  focusEnd();
-  const prefill = content();
-  const clear = await clearAll();
-  await sleep(300);
-
-  const wanted = parts.filter((p) => p.startsWith('#')).length;
-  const results = [];
-  for (const part of parts) {
-    if (!editor()) return { ok: false, reason: 'editor disappeared mid-typing' };
-    if (part.startsWith('#')) {
-      results.push(await addHashtag(part.slice(1)));
-    } else {
-      insertPaste(part);
-      await sleep(250);
-    }
-  }
-  await sleep(600);
-
-  const el = editor();
-  if (!el) return { ok: false, reason: 'editor disappeared' };
-  const spans = Array.from(el.querySelectorAll('span'))
-    .filter((s) => (s.innerText || '').trim().startsWith('#'))
-    .map((s) => (s.innerText || '').trim());
-  return {
-    ok: true,
-    content: el.innerText,
-    draftAccepted: !placeholderVisible(),
-    prefill: prefill,
-    cleared: clear.cleared,
-    clearMethod: clear.method,
-    hashtagsWanted: wanted,
-    hashtagsHighlighted: spans.length,
-    highlighted: spans,
-    results: results,
-  };
-})()
-"""
+    is_empty = (
+        f"(() => {{ const el = document.querySelector({sel_json}); "
+        f"return !el || (el.innerText || '').trim() === ''; }})()"
+    )
+    # 2 = Ctrl (Linux/Windows), 4 = Meta (macOS). The server runs Linux but
+    # the same tool is used from a Mac during local debugging.
+    for modifier in (2, 4):
+        try:
+            await select_all(modifier)
+            await delete_selection()
+        except Exception as exc:
+            _logger.warning("CDP clear failed: %s", exc)
+            return False
+        await asyncio.sleep(0.3)
+        if (await _eval_js(browser_session, is_empty)).get("value") is True:
+            return True
+    return False
 
 
 def _summarize_value(val: Any, limit: int = 600) -> str:
@@ -534,6 +464,21 @@ def build_tools() -> Tools:
                 error=result["error"],
             )
         val = result["value"]
+
+        # The field was prefilled and JS could not clear it. Wipe it with
+        # real key presses and type the caption into the empty field.
+        if isinstance(val, dict) and val.get("ok") and not val.get("cleared"):
+            _logger.warning(
+                "caption prefill %r survived the JS clear — retrying via CDP keys",
+                val.get("prefill"),
+            )
+            if await _cdp_clear_field(browser_session, params.selector):
+                retry = await _eval_js(browser_session, expr)
+                if isinstance(retry.get("value"), dict) and retry["value"].get("ok"):
+                    val = retry["value"]
+                    val["clearMethod"] = "cdp-keys"
+                    val["cleared"] = True
+
         if isinstance(val, dict) and val.get("ok"):
             content = val.get("content", "")
             wanted = val.get("hashtagsWanted", 0)

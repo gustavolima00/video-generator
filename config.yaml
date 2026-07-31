@@ -52,7 +52,7 @@ services:
     # Cover is a brief profile "blink" at the very start while the story is
     # already narrated and the subtitle runs from the beginning. Keep it
     # very short (sub-second).
-    cover_duration: 0.5
+    cover_duration: 1.5
     youtube_channel_url: https://www.youtube.com/@FoodieBoyKR
     youtube_channel_urls:
       - https://www.youtube.com/@FoodieBoyKR

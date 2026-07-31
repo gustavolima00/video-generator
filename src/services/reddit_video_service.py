@@ -551,19 +551,16 @@ class RedditVideoService:
             for s in captions_result.captions.segments
         ]
 
-        intro_end_time, cta_start_time = self._compute_satisfying_boundaries(
-            prepared.story_title, segments_data
-        )
+        cta_start_time = self._compute_satisfying_cta_start(segments_data)
 
-        captions_data = [
-            seg for seg in segments_data if seg["start"] >= intro_end_time
-        ]
-
-        captions_data = self._text_censor.censor_word_dicts(captions_data)
+        # The title is not narrated (it lives on the cover), so the whole
+        # transcription is story content — nothing is trimmed. The cover gets
+        # its own slot at the front of the video instead.
+        captions_data = self._text_censor.censor_word_dicts(segments_data)
 
         captions_result.clip.captions = Captions(
             segments=self._text_censor.censor_segments(
-                captions_result.clip.captions.after_time(intro_end_time).segments
+                captions_result.clip.captions.segments
             )
         )
 
@@ -581,7 +578,6 @@ class RedditVideoService:
             captions_clip_obj=captions_result.clip,
             cover=cover_result.clip,
             low_quality=low_quality,
-            intro_end=intro_end_time,
             cta_start=cta_start_time,
         )
 
@@ -916,35 +912,25 @@ class RedditVideoService:
         image_story.images[0].start_time = 0.0
 
     @staticmethod
-    def _compute_satisfying_boundaries(
-        title: str, segments: list[dict]
-    ) -> tuple[float, float]:
-        """Find intro-end and CTA-start times for a single-story video.
+    def _compute_satisfying_cta_start(segments: list[dict]) -> float:
+        """Find when the call-to-action starts in a single-story video.
 
-        *intro_end*: determined by the number of words in the spoken title.
-        *cta_start*: determined by finding "curta" in the last ~20 segments.
-
-        Returns ``(intro_end_time, cta_start_time)``.
+        The title is not narrated, so there is no spoken intro to detect —
+        only the CTA, found by looking for "curta" in the last ~20 words.
+        Times are relative to the narration; the renderer shifts them when it
+        puts the cover in front.
         """
         n = len(segments)
+        if n == 0:
+            return 0.0
 
-        # --- intro: title word count → end time of last title word ---
-        title_word_count = len(title.split())
-        if title_word_count > 0 and n > title_word_count:
-            intro_end_time = segments[title_word_count - 1]["end"]
-        else:
-            intro_end_time = segments[4]["end"] if n > 4 else 2.0
-
-        # --- CTA: find "curta" in the last 20 words ---
-        cta_start_time = segments[-3]["start"] if n > 3 else intro_end_time + 10
-        search_start = max(title_word_count, n - 20)
-        for i in range(search_start, n):
+        cta_start_time = segments[-3]["start"] if n > 3 else segments[0]["start"]
+        for i in range(max(0, n - 20), n):
             word = RedditVideoService._normalize_marker_word(segments[i].get("word", ""))
             if word in RedditVideoService.CTA_START_WORDS:
-                cta_start_time = segments[i]["start"]
-                break
+                return segments[i]["start"]
 
-        return intro_end_time, cta_start_time
+        return cta_start_time
 
     @staticmethod
     def _strip_introduction(transcription: list[dict]) -> list[dict]:
@@ -1050,7 +1036,6 @@ class RedditVideoService:
         captions_clip_obj: Optional[CaptionsClip],
         cover: Optional[image_clip.ImageClip],
         low_quality: bool,
-        intro_end: float = 0,
         cta_start: float = 0,
     ) -> bytes:
         """Compile a single video and return it as bytes."""
@@ -1072,7 +1057,6 @@ class RedditVideoService:
             low_quality=low_quality,
             cover=cover,
             captions=captions_clip_obj,
-            intro_end=intro_end,
             cta_start=cta_start,
         )
 
