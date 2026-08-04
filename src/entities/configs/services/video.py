@@ -60,17 +60,33 @@ class VideoConfig(BaseYAMLModel):
     )
     end_silece_seconds: int = Field(3, title="End silence seconds")
     padding: int = Field(60, title="Padding")
-    cover_duration: float = Field(
-        1.5,
+    cover_width_ratio: float = Field(
+        0.82,
         title=(
-            "Cover duration in seconds. The cover holds the screen alone at the "
-            "start of the video and the story waits for it: narration, captions "
-            "and images only begin once it fades out, so this adds to the total "
-            "duration."
+            "Cover width as a fraction of the video width. Kept below 1 so the "
+            "cover reads as a card and leaves room for the captions underneath "
+            "it (see CaptionsConfig.vertical_position)."
+        ),
+    )
+    cover_duration: float = Field(
+        0.5,
+        title=(
+            "How long the cover stays on screen, in seconds. It overlays the "
+            "opening of the story — the narration runs from the first frame, so "
+            "this does not add to the video duration."
         ),
     )
     width: int = Field(1080, title="Width of the video")
     height: int = Field(1920, title="Height of the video")
+    fps: int = Field(
+        30,
+        title=(
+            "Output frame rate for the YouTube-background videos. Without it "
+            "the render inherits the frame rate of whichever background got "
+            "downloaded — usually 60, which doubles the frame count and the "
+            "render time. (Image-story videos render at their own fixed 24.)"
+        ),
+    )
     youtube_channel_url: str = Field(
         "https://www.youtube.com/@FoodieBoyKR",
         title="Fallback YouTube channel url",

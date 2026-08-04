@@ -1018,6 +1018,9 @@ class RedditVideoService:
             try:
                 final_video.clip.write_videofile(
                     tmp_path,
+                    # Image stories are stills with slow Ken Burns moves —
+                    # 24 is deliberate here and unrelated to the background
+                    # frame rate the other path has to pin down.
                     fps=24,
                     ffmpeg_params=self._video_service._video_config.ffmpeg_params,
                 )
@@ -1067,6 +1070,7 @@ class RedditVideoService:
             try:
                 final_video.clip.write_videofile(
                     tmp_path,
+                    fps=self._video_service._video_config.fps,
                     ffmpeg_params=self._video_service._video_config.ffmpeg_params,
                 )
                 with open(tmp_path, "rb") as f:

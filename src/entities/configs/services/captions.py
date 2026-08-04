@@ -12,3 +12,12 @@ class CaptionsConfig(BaseYAMLModel):
     upper_text: bool = Field(False)
     marging: int = Field(50)
     fade_duration: float = Field(0)
+    vertical_position: float = Field(
+        0.68,
+        title=(
+            "Where the caption block starts, as a fraction of the video height. "
+            "Sits below the centred cover so the opening subtitles stay readable "
+            "while it is on screen (the cover spans roughly 0.35-0.65 at the "
+            "default VideoConfig.cover_width_ratio)."
+        ),
+    )

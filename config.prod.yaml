@@ -41,8 +41,8 @@ services:
     font_path: default_font.ttf
   video_config:
     call_to_action_path: assets/call_to_action.png
-    # Cover is a brief profile "blink"; subtitles run from the beginning.
-    cover_duration: 1.5
+    # Cover holds the screen alone; the story waits for it (adds to duration).
+    cover_duration: 0.5
     youtube_channel_url: https://www.youtube.com/@FoodieBoyKR
     youtube_channel_urls:
       - https://www.youtube.com/@FoodieBoyKR
@@ -51,6 +51,10 @@ services:
     youtube_surface: shorts
     youtube_channel_strategy: all
     youtube_pool_size: 100
+    # Explicit so the output no longer inherits whatever frame rate the
+    # YouTube background happens to have. 60 keeps what prod produced
+    # before; 30 halves render time if that ever matters.
+    fps: 60
     ffmpeg_params: ["-crf", "23", "-preset", "medium"]
     anti_fingerprint:
       enabled: true
