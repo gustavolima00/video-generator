@@ -44,6 +44,16 @@ proxies:
   transcription_config:
     model: base
     type: local
+  # Backgrounds are downloaded once and reused: the daily run pulls from the
+  # same pool of clips, so re-downloading them is both the slowest step and
+  # what gets this IP throttled (HTTP 429). The whole block is optional — the
+  # values below are the defaults, listed here so they are easy to override.
+  # youtube_config:
+  #   type: pytube
+  #   cache:
+  #     enabled: true                                 # false = re-download every run
+  #     dir: ~/.cache/video-generator/backgrounds     # '~' expanded; created on demand
+  #     max_gigabytes: 20                             # disk budget for the directory
 services:
   captions_config:
     font_path: default_font.ttf

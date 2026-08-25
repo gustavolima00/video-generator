@@ -50,6 +50,7 @@ from src.proxies.mock_llm_proxy import MockLLMProxy
 from src.proxies.interfaces import ILLMProxy, IYouTubeProxy
 from src.entities.configs.proxies.youtube import YouTubeConfigType, PyTubeYouTubeConfig
 from src.proxies.pytube_proxy import PyTubeProxy
+from src.proxies.caching_youtube_proxy import CachingYouTubeProxy
 
 from src.proxies.interfaces import ICoverProxy
 from src.proxies.playwright_cover_proxy import PlaywrightCoverProxy
@@ -198,7 +199,12 @@ class YouTubeProxyFactory:
     @staticmethod
     def create(config: YouTubeConfigType, youtube_api_key: str = None) -> IYouTubeProxy:
         if isinstance(config, PyTubeYouTubeConfig):
-            return PyTubeProxy(config=config)
+            proxy = PyTubeProxy(config=config)
+            if config.cache.enabled:
+                # Wrapping here keeps the cache invisible to the services: they
+                # keep depending on IYouTubeProxy and never learn it exists.
+                return CachingYouTubeProxy(inner=proxy, cache=config.cache)
+            return proxy
         else:
             raise ValueError(f"Unknown YouTube Configuration: {type(config)}")
 

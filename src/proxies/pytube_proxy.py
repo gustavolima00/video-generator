@@ -12,6 +12,21 @@ from src.entities.configs.proxies.youtube import PyTubeYouTubeConfig
 logger = logging.getLogger(__name__)
 
 
+class YouTubeRateLimitError(RuntimeError):
+    """YouTube answered HTTP 429 — this IP is being throttled.
+
+    Separate from a per-video failure because the remedy is different: the
+    throttle applies to the whole address, so neither another client nor
+    another video can succeed. Callers must stop rather than retry, since
+    every extra request extends the block.
+    """
+
+
+def _is_rate_limited(exc: Exception) -> bool:
+    return getattr(exc, "code", None) == 429 or "429" in str(exc)
+
+
+
 class PyTubeProxy(IYouTubeProxy):
     def __init__(self, config: PyTubeYouTubeConfig):
         self.config = config
@@ -66,10 +81,10 @@ class PyTubeProxy(IYouTubeProxy):
     def _collect_video_ids(cls, value: Any) -> List[str]:
         """Extract unique YouTube video IDs from pytubefix channel shapes.
 
-        pytubefix 10.3.8 currently returns ``Channel.video_urls`` entries as
-        empty lists for some handle URLs, while ``initial_data`` still has
-        ``videoId`` fields. This recursive collector handles both the old URL
-        list shape and the current nested dict/list shape.
+        pytubefix returns ``Channel.video_urls`` entries as empty lists for
+        some handle URLs, while ``initial_data`` still has ``videoId`` fields.
+        This recursive collector handles both the old URL list shape and the
+        current nested dict/list shape.
         """
         extracted: list[str] = []
         seen: set[str] = set()
@@ -113,42 +128,78 @@ class PyTubeProxy(IYouTubeProxy):
         return await asyncio.to_thread(self._download_video_sync, video_id, low_quality)
 
     def _download_video_sync(self, video_id: str, low_quality: bool = False) -> bytes:
-        try:
-            url = f"https://www.youtube.com/watch?v={video_id}"
-            yt = YouTube(url)
+        """Download *video_id*, trying each configured client in turn.
 
-            if not low_quality:
-                result = self._try_adaptive_download(yt)
-                if result is not None:
-                    return result
+        The client has to be named explicitly: pytubefix defaults to
+        ANDROID_VR, which YouTube now answers with a bot-detection error, so
+        leaving it implicit fails every download. Clients get blocked one at a
+        time rather than all at once, hence the fallback list.
+        """
+        url = f"https://www.youtube.com/watch?v={video_id}"
+        failures: list[str] = []
 
-            streams = yt.streams.filter(
-                progressive=True, file_extension="mp4"
-            ).order_by("resolution")
-            stream = streams.first() if low_quality else streams.desc().first()
-            if not stream:
-                fallback_streams = yt.streams.filter(file_extension="mp4").order_by(
-                    "resolution"
-                )
-                stream = (
-                    fallback_streams.first()
-                    if low_quality
-                    else fallback_streams.desc().first()
-                )
-                if not stream:
-                    raise ValueError(
-                        f"No suitable mp4 stream found for video_id {video_id}"
+        for client in self.config.download_clients:
+            try:
+                return self._download_with_client(url, video_id, client, low_quality)
+            except Exception as e:
+                if _is_rate_limited(e):
+                    # Throttling is per-IP, so the remaining clients would only
+                    # add requests to a limit we have already exceeded.
+                    logger.error(
+                        "YouTube is rate-limiting this IP (429) on client %s; "
+                        "giving up on %s without trying the rest",
+                        client, video_id,
                     )
+                    raise YouTubeRateLimitError(
+                        f"YouTube returned HTTP 429 for {video_id} (client {client}). "
+                        "This IP is throttled — further requests prolong it."
+                    ) from e
+                failures.append(f"{client}: {type(e).__name__}: {e}")
+                logger.warning(
+                    "Client %s failed for %s (%s: %s), trying the next one",
+                    client, video_id, type(e).__name__, e,
+                )
 
-            logger.info("Downloading progressive %s for %s", stream.resolution, video_id)
-            with tempfile.TemporaryDirectory() as temp_dir:
-                file_path = stream.download(output_path=temp_dir)
-                with open(file_path, "rb") as f:
-                    return f.read()
+        detail = " | ".join(failures) or "no clients configured"
+        logger.error("Failed to download video %s: %s", video_id, detail)
+        raise RuntimeError(f"Failed to download video {video_id}: {detail}")
 
-        except Exception as e:
-            logger.error(f"Failed to download video {video_id}: {e}")
-            raise e
+    def _download_with_client(
+        self, url: str, video_id: str, client: str, low_quality: bool
+    ) -> bytes:
+        yt = YouTube(url, client=client)
+
+        if not low_quality:
+            result = self._try_adaptive_download(yt)
+            if result is not None:
+                return result
+
+        streams = yt.streams.filter(
+            progressive=True, file_extension="mp4"
+        ).order_by("resolution")
+        stream = streams.first() if low_quality else streams.desc().first()
+        if not stream:
+            fallback_streams = yt.streams.filter(file_extension="mp4").order_by(
+                "resolution"
+            )
+            stream = (
+                fallback_streams.first()
+                if low_quality
+                else fallback_streams.desc().first()
+            )
+            if not stream:
+                raise ValueError(
+                    f"No suitable mp4 stream found for video_id {video_id}"
+                )
+
+        logger.info(
+            "Downloading progressive %s for %s via %s",
+            stream.resolution, video_id, client,
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            file_path = stream.download(output_path=temp_dir)
+            with open(file_path, "rb") as f:
+                return f.read()
 
     def _try_adaptive_download(self, yt: YouTube) -> bytes | None:
         """Download a video-only adaptive stream (no audio needed).

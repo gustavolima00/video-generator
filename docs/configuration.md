@@ -151,9 +151,40 @@ YouTube video listing and downloading for background compilations.
 ```yaml
 youtube_config:
   type: pytube
+  download_clients: [WEB, MWEB, WEB_SAFARI]
+  cache:
+    enabled: true
+    dir: ~/.cache/video-generator/backgrounds
+    max_gigabytes: 20
 ```
 
 Currently only `pytube` is available. No API key required for basic usage.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `type` | `"pytube"` | `"pytube"` | Backend used to list and download videos |
+| `download_clients` | `list[str]` | `["WEB", "MWEB", "WEB_SAFARI"]` | InnerTube clients tried in order. pytubefix's own default (`ANDROID_VR`) is answered with a bot-detection error, so the client is always named explicitly; the extras are fallbacks for when one starts getting blocked |
+
+#### Background cache (`youtube_config.cache`)
+
+Downloaded clips are kept on disk and reused. The daily run draws from the same
+pool of videos, so re-downloading them is both the slowest step and what gets
+the machine's IP throttled (HTTP 429) — with a warm cache a repeated run makes
+no download requests at all and completes even while YouTube is refusing them.
+
+Omitting the whole `cache` block keeps the defaults below (the cache is on).
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `enabled` | `bool` | `true` | `false` restores the previous behaviour: every run re-downloads every clip |
+| `dir` | `str` | `~/.cache/video-generator/backgrounds` | Where the mp4 files live. `~` is expanded and the directory is created on demand; the default sits outside the working tree. Caches are per machine — nothing is shared between the laptop and the server |
+| `max_gigabytes` | `float` | `20` | Disk budget for the directory. Must be greater than zero |
+
+Entries are named `{video_id}-{hq|lq}.mp4`, so the two quality tracks are cached
+independently and never serve each other. Caching is best-effort: an unreadable
+or unwritable directory logs a warning and the run downloads as before, and a
+truncated file is discarded and downloaded again rather than failing the run.
+Download errors themselves — a 429 included — still abort immediately.
 
 ---
 
