@@ -197,8 +197,15 @@ class LLMProxyFactory:
 
 class YouTubeProxyFactory:
     @staticmethod
-    def create(config: YouTubeConfigType, youtube_api_key: str = None) -> IYouTubeProxy:
+    def create(
+        config: YouTubeConfigType,
+        youtube_api_key: str = None,
+        youtube_po_token: str = None,
+        youtube_visitor_data: str = None,
+    ) -> IYouTubeProxy:
         if isinstance(config, PyTubeYouTubeConfig):
+            config.po_token = youtube_po_token
+            config.visitor_data = youtube_visitor_data
             proxy = PyTubeProxy(config=config)
             if config.cache.enabled:
                 # Wrapping here keeps the cache invisible to the services: they

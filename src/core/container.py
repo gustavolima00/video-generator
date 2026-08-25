@@ -75,6 +75,8 @@ class ApplicationContainer(containers.DeclarativeContainer):
     youtube_proxy = providers.Singleton(
         proxies_factories.YouTubeProxyFactory.create,
         config=main_config.provided.proxies.youtube_config,
+        youtube_po_token=secrets.youtube_po_token,
+        youtube_visitor_data=secrets.youtube_visitor_data,
     )
     cover_proxy = providers.Singleton(
         proxies_factories.CoverProxyFactory.create,

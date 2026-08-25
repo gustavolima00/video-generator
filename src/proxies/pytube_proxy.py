@@ -5,6 +5,7 @@ import tempfile
 from typing import Any, List, Literal
 
 from pytubefix import YouTube, Channel, Playlist
+from pytubefix.helpers import reset_cache
 
 from src.proxies.interfaces import IYouTubeProxy
 from src.entities.configs.proxies.youtube import PyTubeYouTubeConfig
@@ -26,10 +27,58 @@ def _is_rate_limited(exc: Exception) -> bool:
     return getattr(exc, "code", None) == 429 or "429" in str(exc)
 
 
+_PO_TOKEN_DOC = "docs/po-token.md"
+
 
 class PyTubeProxy(IYouTubeProxy):
     def __init__(self, config: PyTubeYouTubeConfig):
         self.config = config
+        self._po_token_kwargs = self._build_po_token_kwargs(config)
+        if self._po_token_kwargs:
+            # pytubefix keeps the pair in a cache file inside its own package
+            # and reads it in preference to the verifier, so a token renewed in
+            # the .env would stay shadowed by the expired one it replaced.
+            reset_cache()
+
+    @staticmethod
+    def _build_po_token_kwargs(config: PyTubeYouTubeConfig) -> dict:
+        """Build the pytubefix arguments that install the operator's po_token.
+
+        Left to itself pytubefix mints a poToken through botGuard, and that
+        synthetic token is what YouTube is answering with 429 — it carries no
+        real browser session. A token captured from one takes precedence over
+        it. Without a token configured the arguments are empty, so downloads
+        are built exactly as they were before this existed.
+        """
+        po_token, visitor_data = config.po_token, config.visitor_data
+        if not po_token and not visitor_data:
+            return {}
+        if not (po_token and visitor_data):
+            raise ValueError(
+                "YOUTUBE_PO_TOKEN and YOUTUBE_VISITOR_DATA go together: YouTube "
+                "only accepts a po_token alongside the visitor id it was issued "
+                f"for. Set both or neither — see {_PO_TOKEN_DOC}."
+            )
+        return {
+            "use_po_token": True,
+            # pytubefix unpacks the verifier as (visitorData, po_token).
+            "po_token_verifier": lambda: (visitor_data, po_token),
+        }
+
+    def _token_hint(self) -> str:
+        """Suffix pointing at the doc when a configured token may have expired.
+
+        Tokens are captured by hand and go stale silently: YouTube refuses an
+        expired one exactly as it refuses none, so the failure looks identical
+        to the problem the token was installed to fix.
+        """
+        if not self._po_token_kwargs:
+            return ""
+        return (
+            " A po_token is configured, so it may have expired — YouTube refuses "
+            f"an expired token the same way it refuses none; see {_PO_TOKEN_DOC} "
+            "to renew it."
+        )
 
     async def list_video_ids(
         self,
@@ -153,6 +202,7 @@ class PyTubeProxy(IYouTubeProxy):
                     raise YouTubeRateLimitError(
                         f"YouTube returned HTTP 429 for {video_id} (client {client}). "
                         "This IP is throttled — further requests prolong it."
+                        f"{self._token_hint()}"
                     ) from e
                 failures.append(f"{client}: {type(e).__name__}: {e}")
                 logger.warning(
@@ -162,12 +212,14 @@ class PyTubeProxy(IYouTubeProxy):
 
         detail = " | ".join(failures) or "no clients configured"
         logger.error("Failed to download video %s: %s", video_id, detail)
-        raise RuntimeError(f"Failed to download video {video_id}: {detail}")
+        raise RuntimeError(
+            f"Failed to download video {video_id}: {detail}{self._token_hint()}"
+        )
 
     def _download_with_client(
         self, url: str, video_id: str, client: str, low_quality: bool
     ) -> bytes:
-        yt = YouTube(url, client=client)
+        yt = YouTube(url, client=client, **self._po_token_kwargs)
 
         if not low_quality:
             result = self._try_adaptive_download(yt)

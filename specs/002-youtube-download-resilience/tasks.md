@@ -182,21 +182,61 @@ português.
 
 ### Testes (escrever primeiro, ver falhar)
 
-- [ ] T013 [P] [US3] Testes de contrato T1–T6 (construção do `YouTube` com/sem token, ordem da tupla do verifier, par incompleto→erro, mensagem de expiração, 429 preservado, limpeza do cache de tokens do pytubefix na construção) em tests/test_pytube_proxy.py
+- [X] T013 [P] [US3] Testes de contrato T1–T6 (construção do `YouTube` com/sem token, ordem da tupla do verifier, par incompleto→erro, mensagem de expiração, 429 preservado, limpeza do cache de tokens do pytubefix na construção) em tests/test_pytube_proxy.py
 
 ### Implementação
 
-- [ ] T014 [P] [US3] Adicionar `youtube_po_token` e `youtube_visitor_data` (Optional, default None) em src/core/secrets.py
-- [ ] T015 [US3] Adicionar `po_token`/`visitor_data` em `PyTubeYouTubeConfig` (nunca vindos do yaml; whitespace→None) em src/entities/configs/proxies/youtube.py, repassar de `Secrets` na `YouTubeProxyFactory.create` em src/proxies/factories.py e no wiring em src/core/container.py (mesmo padrão dos demais segredos)
-- [ ] T016 [US3] No `PyTubeProxy` (src/proxies/pytube_proxy.py): validar o par na construção (fail fast se incompleto, T3); limpar o cache interno de tokens do pytubefix quando token presente (T4 — `pytubefix.helpers.reset_cache()` ou remoção de `pytubefix/__cache__/tokens.json`, confirmar qual limpa o arquivo, ver research.md §1); passar `use_po_token=True` + `po_token_verifier` em `_download_with_client` (T1/T2); enriquecer o erro de download com a dica de expiração apontando docs/po-token.md quando token configurado (T5)
-- [ ] T017 [P] [US3] Escrever docs/po-token.md em português cobrindo os 4 pontos do contrato configuracao.md (o que resolve/não resolve, obtenção via DevTools `v1/player`, instalação no `.env`, reconhecimento de expiração e renovação)
-- [ ] T018 [P] [US3] Adicionar placeholders `YOUTUBE_PO_TOKEN`/`YOUTUBE_VISITOR_DATA` com comentário apontando docs/po-token.md em env.example, e referenciar a doc na seção YouTube de docs/configuration.md
+- [X] T014 [P] [US3] Adicionar `youtube_po_token` e `youtube_visitor_data` (Optional, default None) em src/core/secrets.py
+- [X] T015 [US3] Adicionar `po_token`/`visitor_data` em `PyTubeYouTubeConfig` (nunca vindos do yaml; whitespace→None) em src/entities/configs/proxies/youtube.py, repassar de `Secrets` na `YouTubeProxyFactory.create` em src/proxies/factories.py e no wiring em src/core/container.py (mesmo padrão dos demais segredos)
+- [X] T016 [US3] No `PyTubeProxy` (src/proxies/pytube_proxy.py): validar o par na construção (fail fast se incompleto, T3); limpar o cache interno de tokens do pytubefix quando token presente (T4 — `pytubefix.helpers.reset_cache()` ou remoção de `pytubefix/__cache__/tokens.json`, confirmar qual limpa o arquivo, ver research.md §1); passar `use_po_token=True` + `po_token_verifier` em `_download_with_client` (T1/T2); enriquecer o erro de download com a dica de expiração apontando docs/po-token.md quando token configurado (T5)
+- [X] T017 [P] [US3] Escrever docs/po-token.md em português cobrindo os 4 pontos do contrato configuracao.md (o que resolve/não resolve, obtenção via DevTools `v1/player`, instalação no `.env`, reconhecimento de expiração e renovação)
+- [X] T018 [P] [US3] Adicionar placeholders `YOUTUBE_PO_TOKEN`/`YOUTUBE_VISITOR_DATA` com comentário apontando docs/po-token.md em env.example, e referenciar a doc na seção YouTube de docs/configuration.md
 
 ### Live verification (milestone gate)
 
-- [ ] T019 [US3] Rodar `uv run pytest tests/test_pytube_proxy.py -q` (verde), a checagem de higiene `git grep -iE "po_token|visitor_data" -- ':!specs' ':!docs' ':!*.md'` (só nomes de campo, nenhum valor) e o cenário 🌐 manual do quickstart.md M3: seguir docs/po-token.md do zero, download passa com token; token corrompido → mensagem aponta a doc (SC-004/SC-005)
+- [X] T019 [US3] Rodar `uv run pytest tests/test_pytube_proxy.py -q` (verde), a checagem de higiene `git grep -iE "po_token|visitor_data" -- ':!specs' ':!docs' ':!*.md'` (só nomes de campo, nenhum valor) e o cenário 🌐 manual do quickstart.md M3: seguir docs/po-token.md do zero, download passa com token; token corrompido → mensagem aponta a doc (SC-004/SC-005)
 
-**Checkpoint**: Milestone 3 DONE — PR 3 abre aqui.
+**Evidência do gate M3 (2026-08-25)**:
+
+- Automatizado: `uv run pytest tests/test_pytube_proxy.py -q` → **20 passed** (9 novos, todos
+  vermelhos antes da implementação). Regressão completa `uv run pytest -q` → **178 passed,
+  1 failed** — a mesma falha pré-existente do T001 (`tests/test_translation_pipeline.py::test_pipeline`),
+  intocada.
+- Higiene de segredo (FR-009): `git grep -iE "po_token|visitor_data" -- ':!specs' ':!docs' ':!*.md'`
+  (repetido com `grep -rIn` para pegar também os arquivos ainda não rastreados) → só nomes de
+  campo, placeholders do `env.example` (`your_po_token_here`) e literais óbvios de teste
+  (`THE-TOKEN`, `po-token-value`). **Nenhum valor real** em arquivo rastreado.
+- Manual, contra o `config.yaml` real carregado por `MainConfig.from_yaml`, o
+  `ApplicationContainer` real e o pytubefix real. O par sintético entrou por **variável de
+  ambiente**, não no `.env` do usuário — nenhum token real foi capturado ou gravado:
+  - Container montou `CachingYouTubeProxy` → `PyTubeProxy` com `use_po_token=True` e
+    `po_token_verifier()` devolvendo `(visitor_data, po_token)` **nessa ordem** (T1/T2 ao vivo).
+  - T4 ao vivo: um `tokens.json` obsoleto foi plantado em
+    `.venv/.../pytubefix/__cache__/`; após construir o proxy com token, **o arquivo e o
+    diretório sumiram** — `reset_cache()` é de fato quem limpa esse cache (a dúvida deixada
+    em aberto na research.md §1 fica resolvida: `reset_cache()`, não remoção manual).
+  - O `pytubefix.YouTube` **real** aceitou os kwargs (`yt.use_po_token is True`), então o
+    contrato não depende do fake dos testes.
+  - T3 ao vivo pela `YouTubeProxyFactory` real: par pela metade → `ValueError` citando
+    `YOUTUBE_PO_TOKEN`, `YOUTUBE_VISITOR_DATA` e `docs/po-token.md`.
+  - Valores em branco pela factory real → `config.po_token` normalizado para `None` e
+    nenhum kwarg passado (comportamento idêntico ao de hoje, FR-010).
+- 🌐 Manual, SC-005 (segunda metade — token corrompido): download real de `NC7t39glF1U` com
+  um par inválido, pelo `PyTubeProxy` interno (cache propositalmente contornado). O YouTube
+  respondeu **HTTP 429 de verdade**; o proxy abortou depois de **um único cliente** (FR-013 /
+  T6 ao vivo) e a mensagem trouxe a dica: *"A po_token is configured, so it may have expired —
+  ... see docs/po-token.md to renew it."* (T5 ao vivo).
+- Caminhos de campo da doc conferidos contra o próprio pytubefix: `insert_po_token` grava o
+  token em `serviceIntegrityDimensions.poToken` e o visitor em `context.client.visitorData` —
+  exatamente os dois campos que `docs/po-token.md` manda ler do payload de `v1/player`.
+- **Não verificado ao vivo**: SC-004 — um token **válido** fazendo um download passar. Exige
+  capturar um po_token real da sessão de navegador do operador e instalá-lo no `.env`, o que é
+  ação dele, não do agente; e com o IP em 429 o resultado não seria conclusivo de qualquer
+  forma (a própria doc registra que o token não resgata um IP já bloqueado). O caminho até o
+  pytubefix está verificado ponta a ponta com token sintético; o que falta é só a aceitação
+  pelo YouTube. Também não verificado: a leitura da doc por um operador humano do zero.
+
+**Checkpoint**: ✅ Milestone 3 DONE (2026-08-25, gate passou) — PR 3 abre aqui.
 
 ---
 

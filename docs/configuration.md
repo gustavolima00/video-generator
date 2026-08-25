@@ -159,6 +159,9 @@ youtube_config:
 ```
 
 Currently only `pytube` is available. No API key required for basic usage.
+Downloads can optionally carry a proof-of-origin token to get past YouTube's bot
+detection — it is a secret, so it lives in the `.env` rather than here; see
+[po-token.md](./po-token.md).
 
 | Field | Type | Default | Description |
 |---|---|---|---|
@@ -282,5 +285,7 @@ OLLAMA_BASE_URL=http://localhost:11434
 | `ELEVENLABS_API_KEY` | ElevenLabs speech | — |
 | `LEONARDO_API_KEY` | Leonardo AI image generation | — |
 | `OLLAMA_BASE_URL` | Ollama LLM provider | `http://localhost:11434` |
+| `YOUTUBE_PO_TOKEN` | Background downloads rejected by YouTube's bot detection — see [po-token.md](./po-token.md) | — |
+| `YOUTUBE_VISITOR_DATA` | Set together with `YOUTUBE_PO_TOKEN`; YouTube only accepts the token alongside the visitor id it was issued for | — |
 
 All secrets are optional — only provide the ones needed by your chosen providers.

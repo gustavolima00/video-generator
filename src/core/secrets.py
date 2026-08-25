@@ -30,6 +30,13 @@ class Secrets(BaseSettings):
     tiktok_email: Optional[str] = None
     tiktok_password: Optional[str] = None
 
+    # YouTube proof-of-origin token. Captured by hand from a browser session
+    # and renewed the same way when it expires; see docs/po-token.md. Both
+    # halves belong together — pytubefix sends the visitor data alongside the
+    # token. Leaving them unset keeps downloads exactly as they are today.
+    youtube_po_token: Optional[str] = None
+    youtube_visitor_data: Optional[str] = None
+
     model_config = ConfigDict(env_file=".env", case_sensitive=False, extra="ignore")
 
 

@@ -1,5 +1,5 @@
-from typing import List, Literal, Union
-from pydantic import Field
+from typing import List, Literal, Optional, Union
+from pydantic import ConfigDict, Field, field_validator
 from src.entities.base_yaml_model import BaseYAMLModel
 
 
@@ -47,6 +47,33 @@ class PyTubeYouTubeConfig(BaseYAMLModel):
         default_factory=BackgroundCacheConfig,
         title="Local cache for downloaded backgrounds",
     )
+    po_token: Optional[str] = Field(
+        None,
+        title=(
+            "Proof-of-origin token proving the download comes from a real browser "
+            "session. It is a secret, so it comes from YOUTUBE_PO_TOKEN in the .env "
+            "and never from the yaml; see docs/po-token.md. Without it pytubefix "
+            "mints its own, which is what YouTube answers with 429."
+        ),
+    )
+    visitor_data: Optional[str] = Field(
+        None,
+        title=(
+            "The visitor id the po_token was issued for, from YOUTUBE_VISITOR_DATA. "
+            "YouTube only accepts the token together with it, so the two are set "
+            "and renewed as a pair."
+        ),
+    )
+
+    # The factory assigns the pair after loading the yaml, so the blank-to-None
+    # normalisation has to run on assignment too — otherwise an operator who
+    # empties the .env values would send empty strings as a token.
+    model_config = ConfigDict(validate_assignment=True)
+
+    @field_validator("po_token", "visitor_data")
+    @classmethod
+    def _blank_is_unset(cls, value: Optional[str]) -> Optional[str]:
+        return (value or "").strip() or None
 
 
 YouTubeConfigType = Union[PyTubeYouTubeConfig]
