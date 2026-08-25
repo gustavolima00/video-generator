@@ -59,10 +59,10 @@ services:
     font_path: default_font.ttf
   video_config:
     call_to_action_path: assets/call_to_action.png
-    # Cover holds the screen alone at the start; the story waits for it
-    # (narration, captions and CTA are all shifted by this much, so it
-    # adds to the total duration).
-    cover_duration: 0.5
+    # How long the cover card stays on screen. It overlays the opening of the
+    # story — narration and captions run from the first frame — so this is a
+    # display duration, not a lead-in: raising it does not lengthen the video.
+    cover_duration: 3
     youtube_channel_url: https://www.youtube.com/@FoodieBoyKR
     youtube_channel_urls:
       - https://www.youtube.com/@FoodieBoyKR
