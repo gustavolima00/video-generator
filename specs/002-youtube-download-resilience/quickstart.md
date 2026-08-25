@@ -9,11 +9,23 @@ de config em [contracts/configuracao.md](./contracts/configuracao.md).
 ## Pré-requisitos
 
 ```bash
-uv sync
+uv sync --extra dev
 ```
+
+> **Divergência marcada na implementação (T020)**: o `uv sync` puro **remove** o pytest,
+> que vive no extra `dev` — o comando original deste guia deixava a suíte impossível de
+> rodar. Corrigido para `--extra dev`.
 
 Testes rodam sem rede (proxy interno fake); os cenários manuais marcados com 🌐
 tocam o YouTube de verdade — rodar com moderação, o IP pode estar throttled.
+
+> **Divergência marcada na implementação (T020)**: os cenários manuais abaixo mandam
+> rodar `tests/script_youtube_download.py`, que está **defasado e não serve** para
+> validar esta feature: (a) chama `list_video_ids` de forma síncrona, mas a interface é
+> `async` desde antes desta feature; (b) sorteia um `video_id` novo a cada execução, então
+> a segunda rodada nunca produziria um hit. Os gates M1/M2 foram executados com scripts
+> equivalentes e corretos, montados no scratchpad da sessão. Consertar o script segue
+> fora do escopo desta feature — está registrado aqui para quem repetir a validação.
 
 ## M1 — Cache (US1)
 
@@ -40,8 +52,13 @@ passam sem mudança de comportamento.
 Automatizado:
 
 ```bash
-uv run pytest tests/test_caching_youtube_proxy.py -q -k evict
+uv run pytest tests/test_caching_youtube_proxy.py -q
 ```
+
+> **Divergência marcada na implementação (T020)**: o seletor original `-k evict` só
+> alcança 4 dos 9 testes do M2 — os casos de ordem LRU, de touch no hit e de cap menor
+> que um clipe não têm "evict" no nome. O gate do T012 rodou o arquivo inteiro; o comando
+> aqui foi alinhado a ele.
 
 Esperado: C8 do contrato — total nunca excede o cap; ordem LRU; touch no hit
 muda a ordem; cap menor que um clipe não quebra a execução.

@@ -15,6 +15,12 @@ instalado (`.venv/.../pytubefix`, versão 10.11.0), não em documentação exter
 (`pytubefix/__cache__/tokens.json`, via `pytubefix.helpers.reset_cache()` ou
 remoção direta — confirmar na implementação qual dos dois limpa esse arquivo).
 
+> **Resolvido na implementação (M3, 2026-08-25)**: é o `reset_cache()`. Verificado ao
+> vivo no gate do T019 — um `tokens.json` plantado em
+> `.venv/.../pytubefix/__cache__/` sumiu (arquivo e diretório) após construir o
+> `PyTubeProxy` com token. `src/proxies/pytube_proxy.py` usa
+> `pytubefix.helpers.reset_cache()`; a remoção manual do arquivo era desnecessária.
+
 **Rationale** (fatos verificados no código de 10.11.0):
 
 - Todos os clients configurados no projeto (`WEB`, `MWEB`, `WEB_SAFARI`) têm

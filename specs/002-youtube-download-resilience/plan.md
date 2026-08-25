@@ -116,8 +116,9 @@ e `docs/po-token.md` em português (obter, instalar, detectar expiração, renov
   verifier retorna `(visitor_data, po_token)` da config; sem token (ou token em
   branco), `YouTube` é construído exatamente como hoje; falha com token
   configurado menciona renovação e a doc.
-- FR-004 do spec de qualidade: nenhum valor de token em arquivo rastreado
-  (`git grep` limpo; `.env` já está no `.gitignore`).
+- FR-009 (era "FR-004" aqui — erro de referência corrigido no T020; FR-004 é o cap de
+  disco): nenhum valor de token em arquivo rastreado (`git grep` limpo; `.env` já está
+  no `.gitignore`).
 - SC-005: doc revisada seguindo apenas os passos escritos.
 
 **Projeção**: 3 PRs.

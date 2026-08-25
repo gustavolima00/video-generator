@@ -229,7 +229,10 @@ português.
 - Caminhos de campo da doc conferidos contra o próprio pytubefix: `insert_po_token` grava o
   token em `serviceIntegrityDimensions.poToken` e o visitor em `context.client.visitorData` —
   exatamente os dois campos que `docs/po-token.md` manda ler do payload de `v1/player`.
-- **Não verificado ao vivo**: SC-004 — um token **válido** fazendo um download passar. Exige
+- **Não verificado ao vivo** (rótulo corrigido no T020: isto **não** é o SC-004 — o SC-004 do
+  spec é "sem token configurado, comportamento inalterado", que *está* verificado logo acima
+  e pela regressão verde; o que falta abaixo é a segunda metade do cenário manual do SC-005):
+  um token **válido** fazendo um download passar. Exige
   capturar um po_token real da sessão de navegador do operador e instalá-lo no `.env`, o que é
   ação dele, não do agente; e com o IP em 429 o resultado não seria conclusivo de qualquer
   forma (a própria doc registra que o token não resgata um IP já bloqueado). O caminho até o
@@ -242,8 +245,69 @@ português.
 
 ## Phase 6: Polish & Cross-Cutting
 
-- [ ] T020 Rodar a regressão completa `uv run pytest -q` e revisar os artefatos da feature (spec/plan/contratos) marcando divergências que a implementação revelou
-- [ ] T021 [P] Atualizar o checklist specs/002-youtube-download-resilience/checklists/requirements.md se algum requisito mudou durante a implementação
+- [X] T020 Rodar a regressão completa `uv run pytest -q` e revisar os artefatos da feature (spec/plan/contratos) marcando divergências que a implementação revelou
+- [X] T021 [P] Atualizar o checklist specs/002-youtube-download-resilience/checklists/requirements.md se algum requisito mudou durante a implementação
+
+**Evidência do T020 (2026-08-25)**:
+
+- Regressão completa: `uv run pytest -q` → **178 passed, 1 failed**. A única falha é a
+  pré-existente registrada no T001 (`tests/test_translation_pipeline.py::test_pipeline`,
+  `PromptLLMProxy.translate_and_adapt` não existe mais), alheia à feature e intocada por ela.
+- Invariantes congelados conferidos no git: `src/proxies/interfaces.py` e
+  `src/services/video_service.py` **não foram tocados** por nenhum dos três commits da
+  feature (`b1016fa`, `fea6e7e`, `9ab832b`) — o último commit neles é `3ad4c90`, anterior
+  ao M1. A `IYouTubeProxy` seguiu congelada como o contrato exige.
+- Cobertura dos contratos: C1–C11 e T1–T6 têm teste nomeado correspondente
+  (34 em tests/test_caching_youtube_proxy.py, 20 em tests/test_pytube_proxy.py),
+  incluindo C9 (`test_concurrent_misses_both_return_valid_bytes`) e a atomicidade
+  (`test_no_partial_file_is_visible_while_the_download_runs`).
+
+**Divergências encontradas e marcadas nos artefatos**:
+
+1. **research.md §1** — a decisão deixava em aberto "confirmar na implementação qual dos
+   dois limpa esse arquivo" (`reset_cache()` vs. remoção manual de `tokens.json`).
+   Resolvido: é o `reset_cache()`, verificado ao vivo no gate do M3. Marcado na research.md.
+2. **plan.md, gate do M3** — citava "FR-004 do spec de qualidade" para a higiene de segredo;
+   o FR correto é o **FR-009** (FR-004 é o cap de disco). Referência corrigida no plan.md.
+3. **tasks.md, evidência do M3** — o item "não verificado ao vivo" estava rotulado como
+   SC-004. O SC-004 do spec é "sem token configurado, comportamento inalterado", que *está*
+   verificado (factory real normalizando valores em branco + regressão verde). O que segue
+   sem verificação ao vivo é a segunda metade do cenário do **SC-005** (token válido fazendo
+   um download real passar). Rótulo corrigido na própria evidência do M3.
+4. **quickstart.md, pré-requisitos** — mandava `uv sync`, que **remove** o pytest (ele vive
+   no extra `dev`), deixando a suíte impossível de rodar. Corrigido para `uv sync --extra dev`.
+5. **quickstart.md, gate automatizado do M2** — o seletor `-k evict` alcança só 4 dos 9
+   testes do M2 (ordem LRU, touch no hit e cap menor que um clipe não têm "evict" no nome),
+   ou seja, não cobria o C8 inteiro que o guia prometia. Alinhado ao comando do T012
+   (arquivo inteiro).
+6. **quickstart.md, cenários manuais 🌐** — apontam para `tests/script_youtube_download.py`,
+   que está defasado e **não serve** para validar a feature: chama `list_video_ids` de forma
+   síncrona (a interface é `async` desde antes desta feature) e sorteia um `video_id` novo a
+   cada execução, então a segunda rodada nunca produziria hit. Marcado no quickstart.md.
+   Consertar o script continua fora do escopo desta feature.
+
+**O que segue sem verificação (aceito, registrado)**:
+
+- **SC-006** (≥80% menos tempo na aquisição de backgrounds com cache quente) — **não medido**.
+  Os gates M1/M2 rodaram com um clipe local fazendo as vezes de rede no miss porque o IP
+  esteve em 429 o dia todo, então os tempos observados não representam a economia real.
+  Fica pendente de uma medição numa execução real com rede saudável; nada no código depende
+  disso, é aferição.
+- Segunda metade do **SC-005**: um po_token **válido** fazendo um download real passar —
+  depende de o operador capturar um token da própria sessão de navegador, e com o IP em 429
+  o resultado não seria conclusivo. O caminho até o pytubefix está verificado ponta a ponta
+  com token sintético.
+- **SC-005**, leitura da doc por um operador humano do zero — os caminhos de campo de
+  `docs/po-token.md` foram conferidos contra o código do pytubefix, mas ninguém além do
+  agente seguiu o passo a passo.
+
+**Evidência do T021 (2026-08-25)**: nenhum requisito (FR-001–FR-013) ou critério de sucesso
+(SC-001–SC-006) mudou de texto ou de intenção durante a implementação — as 6 divergências
+acima são de artefato de apoio (comandos, referências cruzadas, uma pergunta em aberto da
+research), não de requisito. O checklist segue 16/16 e ganhou apenas uma nota registrando
+esta revisão pós-implementação.
+
+**Checkpoint**: ✅ Feature completa — os 3 milestones passaram seus gates e o polish fechou.
 
 ---
 
