@@ -282,12 +282,17 @@ def _build_schedule_steps(schedule_at: datetime) -> str:
     hh = schedule_at.strftime("%H")
     mm = schedule_at.strftime("%M")
     return (
-        "7. Scroll 'When to post' into view and click 'Schedule' radio. "
-        "A time picker may auto-open — ignore it and proceed.\n"
+        "7. Call `activate_schedule()` to switch from 'Now' to scheduled "
+        "posting. It finds the control regardless of UI language and "
+        "confirms the date/time fields appeared. If it returns "
+        "'not_activated' or 'failed', call it ONCE more; if it still "
+        "fails, stop with done(success=False, text=<what you saw>) — do "
+        "NOT hunt for the radio by clicking element indices, the block "
+        "re-renders on every click and you will loop.\n"
         f"8. Call `set_schedule_date(day='{day}')` to set date to {iso_date}.\n"
         f"9. Call `set_schedule_time(hour='{hh}', minute='{mm}')` to set time.\n"
         f"10. Call `get_schedule_values()` to verify it shows {hh}:{mm} and {iso_date}.\n"
-        "11. Call `scroll_to_submit()`, then `click_by_text(text='Schedule', role='button')`.\n"
+        "11. Call `submit_post()` to schedule it.\n"
         "12. Wait for confirmation or /manage redirect, "
         "then done(success=True, text=<confirmation or URL>).\n"
     )
@@ -734,8 +739,8 @@ class BrowserUseTikTokPublisherProxy(ITikTokPublisherProxy):
             schedule_block = _build_schedule_steps(schedule_at)
         else:
             schedule_block = (
-                "4. Click 'Post' / 'Postar' to publish immediately.\n"
-                "5. Wait for confirmation, "
+                "7. Call `submit_post()` to publish immediately.\n"
+                "8. Wait for confirmation, "
                 "then done(success=True, text=<confirmation or URL>).\n"
             )
 
@@ -744,6 +749,11 @@ class BrowserUseTikTokPublisherProxy(ITikTokPublisherProxy):
             "\n"
             "Session is already logged in. DO NOT create todo.md or any "
             "planning files — execute steps directly.\n"
+            "\n"
+            "IMPORTANT: The UI language is not fixed — it may render in "
+            "English or Portuguese ('Agendar', 'Descartar', 'Publicar'). "
+            "Never match on an English label alone; prefer the tools "
+            "below, which handle both.\n"
             "\n"
             "IMPORTANT: For scheduling (date/time), ONLY use the "
             "set_schedule_date and set_schedule_time tools. Do NOT try "
@@ -766,7 +776,11 @@ class BrowserUseTikTokPublisherProxy(ITikTokPublisherProxy):
             "a day number (e.g. day='15').\n"
             "- `set_schedule_time(hour, minute)` — opens time picker, clicks "
             "hour+minute, closes picker (e.g. hour='13', minute='30').\n"
+            "- `activate_schedule()` — turns on scheduling mode and verifies "
+            "it stuck. Always call this before the date/time tools.\n"
             "- `get_schedule_values()` — reads current [time, date] from inputs.\n"
+            "- `submit_post()` — scrolls to the submit button and clicks it, "
+            "whatever its label says.\n"
             "- `scroll_to_submit()` — scrolls the Schedule/Post button into view.\n"
             "- `click_by_text(text, role?, index?)` — click element by text.\n"
             "- `upload_video(file_path)` — upload a video via CDP. Handles "

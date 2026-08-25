@@ -40,6 +40,76 @@ from src.core.logging_config import get_logger
 _logger = get_logger(__name__)
 
 
+# TikTok Studio renders in the account's interface language, and it is not
+# pinned: the account flipped from English to Portuguese, at which point every
+# English-only text matcher below silently found nothing and the run stalled
+# (the overlay was "Descartar", not "Discard"). Match every label in both
+# languages rather than guessing which one is live.
+_LABELS: dict[str, list[str]] = {
+    "continue_editing": ["continue editing", "continuar editando"],
+    "discard": ["discard", "descartar"],
+    "edit_cover": ["edit cover", "editar capa"],
+    "save": ["save", "salvar"],
+    "when_to_post": ["when to post", "quando publicar", "quando postar"],
+    "schedule": ["schedule", "agendar", "programar"],
+}
+
+
+def _variants(*keys: str) -> str:
+    """JSON array of every lowercase label variant for *keys*, for use in JS."""
+    out: list[str] = []
+    for key in keys:
+        out.extend(_LABELS[key])
+    return json.dumps(out)
+
+
+# Shared JS helpers. Prepended to snippets that match elements by text so the
+# matching rules (visibility, exact-vs-contains, smallest-match-wins) stay in
+# one place instead of being re-typed slightly differently in each tool.
+_JS_HELPERS = r"""
+const __ttVisible = (el) => {
+  if (!el.offsetParent && getComputedStyle(el).position !== 'fixed') return false;
+  const r = el.getBoundingClientRect();
+  return r.width > 0 && r.height > 0;
+};
+const __ttText = (el) => (el.innerText || '').trim().toLowerCase();
+// Smallest match wins: the tightest element around the text is the control,
+// not the container that happens to include it.
+const __ttFind = (variants, exact) => {
+  const hits = [];
+  for (const el of document.querySelectorAll('*')) {
+    if (!__ttVisible(el)) continue;
+    const t = __ttText(el);
+    if (!t) continue;
+    const hit = exact ? variants.includes(t) : variants.some(v => t.includes(v));
+    if (!hit) continue;
+    const r = el.getBoundingClientRect();
+    hits.push({el, area: r.width * r.height});
+  }
+  hits.sort((a, b) => a.area - b.area);
+  return hits.map(h => h.el);
+};
+// The date and time fields only exist once schedule mode is on, which makes
+// them a language-independent way to tell whether activation worked.
+const __ttScheduleInputs = () =>
+  [...document.querySelectorAll('input.TUXTextInputCore-input')]
+    .filter(e => /\d/.test(e.value));
+"""
+
+
+def _js(code: str) -> str:
+    """Expand ``__HELPERS__`` and ``__LABEL__`` placeholders in a JS snippet.
+
+    Keeps the snippets readable and the label lists in one place, instead of
+    every tool carrying its own copy of the matching helpers.
+    """
+    out = code.replace("__HELPERS__", _JS_HELPERS)
+    for key in _LABELS:
+        out = out.replace(f"__{key.upper()}__", _variants(key))
+    return out
+
+
+
 def _wrap_js_for_eval(code: str) -> str:
     """Make user-supplied JS legal as a CDP ``Runtime.evaluate`` expression.
 
@@ -631,7 +701,8 @@ def build_tools() -> Tools:
     async def dismiss_overlay(params: DismissOverlayAction, browser_session):
         check = await _eval_js(
             browser_session,
-            "document.body.innerText.includes('Continue editing')",
+            f"{_variants('continue_editing')}.some("
+            "v => document.body.innerText.toLowerCase().includes(v))",
         )
         if check.get("value") is not True:
             return ActionResult(
@@ -640,47 +711,27 @@ def build_tools() -> Tools:
         # First discard
         click1_js = """
         (() => {
-          const target = 'discard';
-          const all = Array.from(document.querySelectorAll('*'));
-          const matches = [];
-          for (const el of all) {
-            if (!el.offsetParent && getComputedStyle(el).position !== 'fixed') continue;
-            const t = (el.innerText || '').toLowerCase();
-            if (t && t.includes(target)) {
-              const r = el.getBoundingClientRect();
-              if (r.width > 0 && r.height > 0) matches.push({el, area: r.width * r.height});
-            }
-          }
+          __HELPERS__
+          const matches = __ttFind(__DISCARD__, false);
           if (!matches.length) return {ok: false, reason: 'no Discard found'};
-          matches.sort((a, b) => a.area - b.area);
-          matches[0].el.click();
+          matches[0].click();
           return {ok: true, step: 1};
         })()
         """
-        await _eval_js(browser_session, click1_js)
+        await _eval_js(browser_session, _js(click1_js))
         import asyncio
         await asyncio.sleep(1)
         # Second discard (confirmation dialog inserts a new button)
         click2_js = """
         (() => {
-          const target = 'discard';
-          const all = Array.from(document.querySelectorAll('*'));
-          const matches = [];
-          for (const el of all) {
-            if (!el.offsetParent && getComputedStyle(el).position !== 'fixed') continue;
-            const t = (el.innerText || '').toLowerCase();
-            if (t && t.includes(target)) {
-              const r = el.getBoundingClientRect();
-              if (r.width > 0 && r.height > 0) matches.push({el, area: r.width * r.height});
-            }
-          }
+          __HELPERS__
+          const matches = __ttFind(__DISCARD__, false);
           if (matches.length < 2) return {ok: false, reason: 'second Discard not found'};
-          matches.sort((a, b) => a.area - b.area);
-          matches[1].el.click();
+          matches[1].click();
           return {ok: true, step: 2};
         })()
         """
-        r2 = await _eval_js(browser_session, click2_js)
+        r2 = await _eval_js(browser_session, _js(click2_js))
         if "error" in r2 or not (isinstance(r2.get("value"), dict) and r2["value"].get("ok")):
             return ActionResult(
                 extracted_content="dismiss_overlay -> first Discard clicked but confirmation failed",
@@ -704,17 +755,14 @@ def build_tools() -> Tools:
         # Click "Edit cover"
         open_js = """
         (() => {
-          const all = Array.from(document.querySelectorAll('*'));
-          for (const el of all) {
-            if (!el.offsetParent && getComputedStyle(el).position !== 'fixed') continue;
-            if ((el.innerText || '').trim().toLowerCase() === 'edit cover') {
-              el.click(); return {ok: true, step: 'opened'};
-            }
-          }
-          return {ok: false, reason: 'Edit cover button not found'};
+          __HELPERS__
+          const hits = __ttFind(__EDIT_COVER__, true);
+          if (!hits.length) return {ok: false, reason: 'Edit cover button not found'};
+          hits[0].click();
+          return {ok: true, step: 'opened'};
         })()
         """
-        r = await _eval_js(browser_session, open_js)
+        r = await _eval_js(browser_session, _js(open_js))
         if "error" in r or not (isinstance(r.get("value"), dict) and r["value"].get("ok")):
             return ActionResult(
                 extracted_content="select_cover_frame -> Edit cover button not found",
@@ -740,27 +788,115 @@ def build_tools() -> Tools:
         # Click Save
         save_js = """
         (() => {
-          const all = Array.from(document.querySelectorAll('*'));
-          const matches = [];
-          for (const el of all) {
-            if (!el.offsetParent && getComputedStyle(el).position !== 'fixed') continue;
-            if ((el.innerText || '').trim().toLowerCase() === 'save') {
-              const r = el.getBoundingClientRect();
-              if (r.width > 0 && r.height > 0) matches.push({el, area: r.width * r.height});
-            }
-          }
+          __HELPERS__
+          const matches = __ttFind(__SAVE__, true);
           if (!matches.length) return {ok: false, reason: 'Save button not found'};
-          matches.sort((a, b) => a.area - b.area);
-          matches[0].el.click();
+          matches[0].click();
           return {ok: true, step: 'saved'};
         })()
         """
-        r3 = await _eval_js(browser_session, save_js)
+        r3 = await _eval_js(browser_session, _js(save_js))
         frame_info = r2.get("value", {}) if isinstance(r2.get("value"), dict) else {}
         save_info = r3.get("value", {}) if isinstance(r3.get("value"), dict) else {}
         msg = f"select_cover_frame -> frame={frame_info.get('ok')}, save={save_info.get('ok')}"
         _logger.info(msg)
         return ActionResult(extracted_content=msg, long_term_memory=msg)
+
+    class ActivateScheduleAction(BaseModel):
+        """Switch the post from 'Now' to 'Schedule'."""
+
+    @tools.registry.action(
+        "Turn on scheduling mode (the 'Schedule' / 'Agendar' option under "
+        "'When to post'). Call this BEFORE set_schedule_date/set_schedule_time "
+        "— those need the date and time fields, which only exist once "
+        "scheduling is on. Verifies activation and is safe to call twice.",
+        param_model=ActivateScheduleAction,
+    )
+    async def activate_schedule(params: ActivateScheduleAction, browser_session):
+        """Click the Schedule radio, confirming via the date/time fields.
+
+        Clicking by visible text alone proved unreliable: the label is
+        localised, and the surrounding block re-renders on click so a stale
+        element index silently does nothing. So we try several strategies and
+        decide success from the DOM state (the date/time inputs appearing)
+        rather than from the click appearing to land.
+        """
+        import asyncio
+
+        js = """
+        (() => {
+          __HELPERS__
+          if (__ttScheduleInputs().length >= 2) {
+            return {ok: true, how: 'already-active'};
+          }
+          const labels = __SCHEDULE__;
+
+          // Scroll the 'When to post' block into view first — TikTok only
+          // mounts the radios once the section is on screen.
+          const section = __ttFind(__WHEN_TO_POST__, true)[0];
+          if (section) section.scrollIntoView({block: 'center'});
+
+          const tryClick = (el) => {
+            if (!el) return false;
+            el.click();
+            return true;
+          };
+
+          // 1. A real radio input whose label matches.
+          for (const radio of document.querySelectorAll('input[type=radio]')) {
+            const scope = radio.closest('label') || radio.parentElement;
+            const t = scope ? __ttText(scope) : '';
+            if (t && labels.some(v => t.includes(v)) && !radio.checked) {
+              if (tryClick(radio)) return {ok: null, how: 'radio-input'};
+            }
+          }
+
+          // 2. The tightest visible element whose text is exactly the label.
+          const exact = __ttFind(labels, true);
+          if (exact.length && tryClick(exact[0])) {
+            return {ok: null, how: 'exact-text'};
+          }
+
+          // 3. Fall back to a container that merely contains the word.
+          const loose = __ttFind(labels, false);
+          if (loose.length && tryClick(loose[0])) {
+            return {ok: null, how: 'contains-text'};
+          }
+
+          return {ok: false, reason: 'no Schedule control found'};
+        })()
+        """
+        r = await _eval_js(browser_session, _js(js))
+        val = r.get("value", {}) if isinstance(r.get("value"), dict) else {}
+
+        if val.get("ok") is False:
+            msg = f"activate_schedule -> failed: {val.get('reason', 'unknown')}"
+            return ActionResult(extracted_content=msg, error="not_found")
+
+        if val.get("how") == "already-active":
+            msg = "activate_schedule -> already active"
+            _logger.info(msg)
+            return ActionResult(extracted_content=msg, long_term_memory=msg)
+
+        # The section re-renders after the click; give it a beat, then confirm
+        # against the date/time fields rather than trusting the click.
+        await asyncio.sleep(1.5)
+        check = await _eval_js(
+            browser_session,
+            _js("(() => { __HELPERS__ return __ttScheduleInputs().length; })()"),
+        )
+        count = check.get("value")
+        if isinstance(count, int) and count >= 2:
+            msg = f"activate_schedule -> active (via {val.get('how')})"
+            _logger.info(msg)
+            return ActionResult(extracted_content=msg, long_term_memory=msg)
+
+        msg = (
+            f"activate_schedule -> clicked via {val.get('how')} but the date/time "
+            f"fields did not appear (found {count}). Schedule mode is NOT on."
+        )
+        _logger.warning(msg)
+        return ActionResult(extracted_content=msg, error="not_activated")
 
     class SetScheduleDateAction(BaseModel):
         """Click a day in the TikTok date picker calendar."""
@@ -775,7 +911,7 @@ def build_tools() -> Tools:
     async def set_schedule_date(params: SetScheduleDateAction, browser_session):
         import asyncio
         open_js = "document.querySelectorAll('input.TUXTextInputCore-input')[1].click()"
-        await _eval_js(browser_session, open_js)
+        await _eval_js(browser_session, _js(open_js))
         await asyncio.sleep(0.5)
         day_json = json.dumps(params.day.strip())
         click_js = f"""
@@ -816,7 +952,7 @@ def build_tools() -> Tools:
     async def set_schedule_time(params: SetScheduleTimeAction, browser_session):
         import asyncio
         open_js = "document.querySelectorAll('input.TUXTextInputCore-input')[0].click()"
-        await _eval_js(browser_session, open_js)
+        await _eval_js(browser_session, _js(open_js))
         await asyncio.sleep(0.5)
         hh_json = json.dumps(params.hour.strip())
         mm_json = json.dumps(params.minute.strip())
@@ -860,17 +996,14 @@ def build_tools() -> Tools:
         # Close picker by clicking "When to post"
         close_js = """
         (() => {
-          const all = Array.from(document.querySelectorAll('*'));
-          for (const el of all) {
-            if (!el.offsetParent && getComputedStyle(el).position !== 'fixed') continue;
-            if ((el.innerText || '').trim() === 'When to post') {
-              el.click(); return {ok: true};
-            }
-          }
-          return {ok: false};
+          __HELPERS__
+          const hits = __ttFind(__WHEN_TO_POST__, true);
+          if (!hits.length) return {ok: false};
+          hits[0].click();
+          return {ok: true};
         })()
         """
-        await _eval_js(browser_session, close_js)
+        await _eval_js(browser_session, _js(close_js))
         val = r.get("value", {})
         if isinstance(val, dict) and val.get("ok"):
             return ActionResult(
@@ -933,6 +1066,58 @@ def build_tools() -> Tools:
             extracted_content="scroll_to_submit -> button not found",
             error="not_found",
         )
+
+    class SubmitPostAction(BaseModel):
+        """Scroll the submit button into view and click it."""
+
+    @tools.registry.action(
+        "Scroll the submit button into view and click it to publish or "
+        "schedule the post. Use this instead of click_by_text('Schedule') — "
+        "the button label is localised (Schedule / Agendar / Postar).",
+        param_model=SubmitPostAction,
+    )
+    async def submit_post(params: SubmitPostAction, browser_session):
+        import asyncio
+
+        find_js = """
+        (() => {
+          const btn = [...document.querySelectorAll('button')].find(
+            e => e.className.includes('Button__root') &&
+                 /schedule|post|agendar|postar|publicar/i.test(e.innerText.trim())
+          );
+          if (!btn) return {ok: false, reason: 'submit button not found'};
+          if (btn.disabled) return {ok: false, reason: 'submit button disabled'};
+          btn.scrollIntoView({block: 'center'});
+          return {ok: true, text: btn.innerText.trim()};
+        })()
+        """
+        r = await _eval_js(browser_session, find_js)
+        val = r.get("value", {}) if isinstance(r.get("value"), dict) else {}
+        if not val.get("ok"):
+            msg = f"submit_post -> {val.get('reason', 'unknown')}"
+            return ActionResult(extracted_content=msg, error="not_found")
+
+        await asyncio.sleep(0.5)
+        click_js = """
+        (() => {
+          const btn = [...document.querySelectorAll('button')].find(
+            e => e.className.includes('Button__root') &&
+                 /schedule|post|agendar|postar|publicar/i.test(e.innerText.trim())
+          );
+          if (!btn) return {ok: false, reason: 'submit button vanished'};
+          btn.click();
+          return {ok: true, text: btn.innerText.trim()};
+        })()
+        """
+        r2 = await _eval_js(browser_session, click_js)
+        val2 = r2.get("value", {}) if isinstance(r2.get("value"), dict) else {}
+        if not val2.get("ok"):
+            msg = f"submit_post -> {val2.get('reason', 'unknown')}"
+            return ActionResult(extracted_content=msg, error="click_failed")
+
+        msg = f"submit_post -> clicked '{val2.get('text')}'"
+        _logger.info(msg)
+        return ActionResult(extracted_content=msg, long_term_memory=msg)
 
     return tools
 
