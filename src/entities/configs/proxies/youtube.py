@@ -24,7 +24,10 @@ class BackgroundCacheConfig(BaseYAMLModel):
         20.0,
         gt=0,
         title=(
-            "Disk budget for the cache directory, in gigabytes."
+            "Disk budget for the cache directory, in gigabytes. When a download "
+            "pushes the directory past it, the least recently used clips are "
+            "removed until it fits again; serving a clip from the cache counts "
+            "as using it."
         ),
     )
 

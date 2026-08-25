@@ -178,13 +178,18 @@ Omitting the whole `cache` block keeps the defaults below (the cache is on).
 |---|---|---|---|
 | `enabled` | `bool` | `true` | `false` restores the previous behaviour: every run re-downloads every clip |
 | `dir` | `str` | `~/.cache/video-generator/backgrounds` | Where the mp4 files live. `~` is expanded and the directory is created on demand; the default sits outside the working tree. Caches are per machine — nothing is shared between the laptop and the server |
-| `max_gigabytes` | `float` | `20` | Disk budget for the directory. Must be greater than zero |
+| `max_gigabytes` | `float` | `20` | Disk budget for the directory (GiB). Must be greater than zero. After each download the least recently used clips are evicted until the directory fits again — serving a clip from the cache counts as using it, so the pool in daily rotation survives |
 
 Entries are named `{video_id}-{hq|lq}.mp4`, so the two quality tracks are cached
 independently and never serve each other. Caching is best-effort: an unreadable
 or unwritable directory logs a warning and the run downloads as before, and a
 truncated file is discarded and downloaded again rather than failing the run.
 Download errors themselves — a 429 included — still abort immediately.
+
+Eviction only ever touches `{video_id}-{hq|lq}.mp4` entries in that directory,
+and never the clip the current run just downloaded — those bytes are already in
+memory, so even a cap smaller than a single clip degrades to "nothing is cached"
+rather than breaking the run.
 
 ---
 

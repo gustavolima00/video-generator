@@ -53,7 +53,7 @@ proxies:
   #   cache:
   #     enabled: true                                 # false = re-download every run
   #     dir: ~/.cache/video-generator/backgrounds     # '~' expanded; created on demand
-  #     max_gigabytes: 20                             # disk budget for the directory
+  #     max_gigabytes: 20                             # cap; least recently used clips go first
 services:
   captions_config:
     font_path: default_font.ttf

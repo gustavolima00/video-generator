@@ -124,17 +124,43 @@ conta como uso.
 
 ### Testes (escrever primeiro, ver falhar)
 
-- [ ] T010 [P] [US2] Testes de eviction (contrato C8 + cenários da US2: cap respeitado, ordem LRU, touch no hit reordena, evictado→miss, cap menor que um clipe) em tests/test_caching_youtube_proxy.py
+- [X] T010 [P] [US2] Testes de eviction (contrato C8 + cenários da US2: cap respeitado, ordem LRU, touch no hit reordena, evictado→miss, cap menor que um clipe) em tests/test_caching_youtube_proxy.py
 
 ### Implementação
 
-- [ ] T011 [US2] Implementar touch (`os.utime`) no hit e eviction pós-escrita (somar tamanhos, remover menor `mtime` até caber em `max_gigabytes`; tolerar `FileNotFoundError` de concorrência como miss) em src/proxies/caching_youtube_proxy.py
+- [X] T011 [US2] Implementar touch (`os.utime`) no hit e eviction pós-escrita (somar tamanhos, remover menor `mtime` até caber em `max_gigabytes`; tolerar `FileNotFoundError` de concorrência como miss) em src/proxies/caching_youtube_proxy.py
 
 ### Live verification (milestone gate)
 
-- [ ] T012 [US2] Rodar `uv run pytest tests/test_caching_youtube_proxy.py -q` (verde) e o cenário manual do quickstart.md M2: cap pequeno em config.yaml, duas rodadas, `du -sh` confirma SC-003
+- [X] T012 [US2] Rodar `uv run pytest tests/test_caching_youtube_proxy.py -q` (verde) e o cenário manual do quickstart.md M2: cap pequeno em config.yaml, duas rodadas, `du -sh` confirma SC-003
 
-**Checkpoint**: Milestone 2 DONE — PR 2 abre aqui.
+**Evidência do gate M2 (2026-08-25)**:
+
+- Automatizado: `uv run pytest tests/test_caching_youtube_proxy.py -q` → **34 passed**
+  (9 novos, todos vermelhos antes da implementação). Regressão completa `uv run pytest -q`
+  → **166 passed, 1 failed** — a mesma falha pré-existente do T001
+  (`tests/test_translation_pipeline.py::test_pipeline`), intocada.
+- Manual (SC-003), contra disco real com o `config.yaml` real carregado por
+  `MainConfig.from_yaml` e o proxy montado pela `YouTubeProxyFactory`
+  (`CachingYouTubeProxy` sobre `PyTubeProxy`, verificado em runtime). Cap de 0,18 GB
+  (193.273.528 bytes) num diretório de teste separado — `~/.cache/video-generator/backgrounds-m2-check`,
+  removido no fim — para não evictar os clipes reais do cache do M1. Clipe real de
+  90.353.808 bytes (`tests/data/NC7t39glF1U.mp4`) fazendo as vezes de rede no miss
+  (o IP segue em 429); da escrita em diante o caminho é o de produção:
+  - Round 1 (frio, A + B): `du -sh` = **172M**, 180.707.616 B ≤ cap. Duas entradas.
+  - Round 2 (hit em A → touch, depois miss em C): eviction escolheu **B**, o não tocado —
+    `du -sh` = **172M**, ≤ cap, entradas `A` e `C`. Reuso contou como uso (US2 cenário 3).
+  - Round 3 (B de volta): miss simples, re-download, `du -sh` = **172M** ≤ cap;
+    eviction tirou A. Eviction é invisível fora do download extra (US2 cenário 2).
+  - Cap respeitado **após cada rodada**, não só no fim (SC-003).
+- **Não verificado ao vivo**: o miss batendo no YouTube de verdade (IP em 429; coberto por
+  teste automatizado com inner fake) e eviction sob concorrência real de duas máquinas —
+  o `FileNotFoundError` de corrida é coberto por teste com `unlink` monkeypatchado.
+- Fora das tarefas listadas, a documentação do cap foi ajustada para virar verdade agora que
+  a eviction existe: `title` do campo `max_gigabytes`, comentário nos dois yamls e a seção
+  do cache em docs/configuration.md.
+
+**Checkpoint**: ✅ Milestone 2 DONE (2026-08-25, gate passou) — PR 2 abre aqui.
 
 ---
 

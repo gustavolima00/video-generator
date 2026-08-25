@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import time
 from pathlib import Path
 
 import pytest
@@ -314,6 +315,173 @@ def test_disabled_cache_does_not_create_its_directory(tmp_path):
     )
 
     assert not target.exists()
+
+
+# --- C8 / US2: the cache stays inside its disk budget ------------------------
+
+
+def gb(n_bytes: float) -> float:
+    """Express a byte budget in the gigabytes the config speaks."""
+    return n_bytes / (1024 ** 3)
+
+
+def clip(size: int, marker: bytes = b"x") -> bytes:
+    """An mp4 payload of exactly *size* bytes."""
+    filler = marker * (size - len(mp4_bytes(b"")))
+    payload = mp4_bytes(filler)
+    assert len(payload) == size
+    return payload
+
+
+def entry_names(directory: Path) -> list[str]:
+    return sorted(p.name for p in directory.iterdir())
+
+
+def cached_bytes(directory: Path) -> int:
+    return sum(p.stat().st_size for p in directory.iterdir())
+
+
+def set_age(path: Path, seconds_ago: float) -> None:
+    """Backdate the last-used time the LRU order reads."""
+    when = time.time() - seconds_ago
+    os.utime(path, (when, when))
+
+
+CLIP_SIZE = 1024
+
+
+def test_the_cap_holds_after_every_insertion(tmp_path):
+    inner = FakeYouTubeProxy(payload=clip(CLIP_SIZE))
+    proxy = build(tmp_path, inner, max_gigabytes=gb(2 * CLIP_SIZE))
+
+    for video_id in ("aaaaaaaaaa1", "bbbbbbbbbb2", "cccccccccc3", "dddddddddd4"):
+        assert asyncio.run(proxy.download_video(video_id)) == clip(CLIP_SIZE)
+        assert cached_bytes(tmp_path) <= 2 * CLIP_SIZE
+
+    assert len(entry_names(tmp_path)) == 2
+
+
+def test_the_least_recently_used_clip_is_evicted_first(tmp_path):
+    inner = FakeYouTubeProxy(payload=clip(CLIP_SIZE))
+    proxy = build(tmp_path, inner, max_gigabytes=gb(2 * CLIP_SIZE))
+
+    asyncio.run(proxy.download_video("staleaaaa11"))
+    asyncio.run(proxy.download_video("freshbbbb22"))
+    set_age(tmp_path / "staleaaaa11-hq.mp4", 3600)
+    set_age(tmp_path / "freshbbbb22-hq.mp4", 60)
+
+    asyncio.run(proxy.download_video("newestcc333"))
+
+    assert entry_names(tmp_path) == ["freshbbbb22-hq.mp4", "newestcc333-hq.mp4"]
+
+
+def test_a_reused_clip_outlives_one_that_was_only_downloaded(tmp_path):
+    # US2 scenario 3: serving a clip from disk counts as use, so it moves to the
+    # back of the eviction queue even though it was downloaded first.
+    inner = FakeYouTubeProxy(payload=clip(CLIP_SIZE))
+    proxy = build(tmp_path, inner, max_gigabytes=gb(2 * CLIP_SIZE))
+
+    asyncio.run(proxy.download_video("oldestaa111"))
+    asyncio.run(proxy.download_video("untouched22"))
+    set_age(tmp_path / "oldestaa111-hq.mp4", 3600)
+    set_age(tmp_path / "untouched22-hq.mp4", 1800)
+
+    asyncio.run(proxy.download_video("oldestaa111"))  # hit → touched
+    asyncio.run(proxy.download_video("newestcc333"))
+
+    assert entry_names(tmp_path) == ["newestcc333-hq.mp4", "oldestaa111-hq.mp4"]
+
+
+def test_a_hit_refreshes_the_last_used_time(tmp_path):
+    proxy = build(tmp_path, FakeYouTubeProxy())
+    asyncio.run(proxy.download_video("abc123def45"))
+    entry = tmp_path / "abc123def45-hq.mp4"
+    set_age(entry, 3600)
+    stale = entry.stat().st_mtime
+
+    assert asyncio.run(proxy.download_video("abc123def45")) == mp4_bytes()
+
+    assert entry.stat().st_mtime > stale
+
+
+def test_an_evicted_clip_comes_back_as_a_plain_miss(tmp_path):
+    inner = FakeYouTubeProxy(payload=clip(CLIP_SIZE))
+    proxy = build(tmp_path, inner, max_gigabytes=gb(CLIP_SIZE))
+
+    asyncio.run(proxy.download_video("evictedaa11"))
+    asyncio.run(proxy.download_video("survivorb22"))  # pushes the first one out
+    assert entry_names(tmp_path) == ["survivorb22-hq.mp4"]
+
+    assert asyncio.run(proxy.download_video("evictedaa11")) == clip(CLIP_SIZE)
+
+    assert inner.download_calls == [
+        ("evictedaa11", False),
+        ("survivorb22", False),
+        ("evictedaa11", False),
+    ], "eviction is invisible apart from the extra download"
+
+
+def test_a_cap_smaller_than_a_single_clip_still_serves_the_run(tmp_path):
+    # The bytes are already in memory when eviction runs, so the current run is
+    # never the one that pays for a cap set too low.
+    inner = FakeYouTubeProxy(payload=clip(CLIP_SIZE))
+    proxy = build(tmp_path, inner, max_gigabytes=gb(CLIP_SIZE // 4))
+
+    assert asyncio.run(proxy.download_video("toobigaa111")) == clip(CLIP_SIZE)
+    assert asyncio.run(proxy.download_video("toobigaa111")) == clip(CLIP_SIZE)
+
+    assert cached_bytes(tmp_path) <= CLIP_SIZE // 4
+    assert inner.download_calls == [("toobigaa111", False)] * 2
+
+
+def test_eviction_leaves_files_that_are_not_cache_entries_alone(tmp_path):
+    stranger = tmp_path / "unrelated.txt"
+    stranger.write_bytes(b"n" * 10 * CLIP_SIZE)
+    inner = FakeYouTubeProxy(payload=clip(CLIP_SIZE))
+    proxy = build(tmp_path, inner, max_gigabytes=gb(2 * CLIP_SIZE))
+
+    asyncio.run(proxy.download_video("aaaaaaaaaa1"))
+    asyncio.run(proxy.download_video("bbbbbbbbbb2"))
+
+    assert stranger.exists(), "the budget covers cached clips, not the whole disk"
+    assert entry_names(tmp_path) == [
+        "aaaaaaaaaa1-hq.mp4",
+        "bbbbbbbbbb2-hq.mp4",
+        "unrelated.txt",
+    ]
+
+
+def test_eviction_tolerates_an_entry_another_run_already_removed(tmp_path, monkeypatch):
+    inner = FakeYouTubeProxy(payload=clip(CLIP_SIZE))
+    proxy = build(tmp_path, inner, max_gigabytes=gb(CLIP_SIZE))
+    asyncio.run(proxy.download_video("vanishedaa1"))
+
+    original_unlink = Path.unlink
+
+    def unlink_racing(self, *args, **kwargs):
+        original_unlink(self, *args, **kwargs)
+        raise FileNotFoundError(self)
+
+    monkeypatch.setattr(Path, "unlink", unlink_racing)
+
+    assert asyncio.run(proxy.download_video("survivorb22")) == clip(CLIP_SIZE)
+    assert entry_names(tmp_path) == ["survivorb22-hq.mp4"]
+
+
+def test_an_undeletable_entry_only_warns(tmp_path, caplog, monkeypatch):
+    inner = FakeYouTubeProxy(payload=clip(CLIP_SIZE))
+    proxy = build(tmp_path, inner, max_gigabytes=gb(CLIP_SIZE))
+    asyncio.run(proxy.download_video("stuckaaaa11"))
+
+    def unlink_denied(self, *args, **kwargs):
+        raise PermissionError(self)
+
+    monkeypatch.setattr(Path, "unlink", unlink_denied)
+
+    with caplog.at_level(logging.WARNING):
+        assert asyncio.run(proxy.download_video("survivorb22")) == clip(CLIP_SIZE)
+
+    assert any(record.levelno == logging.WARNING for record in caplog.records)
 
 
 # --- T003: config regression --------------------------------------------------

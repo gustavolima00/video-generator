@@ -17,6 +17,12 @@ _FTYP_OFFSET = 4
 _FTYP = b"ftyp"
 _MIN_MP4_SIZE = _FTYP_OFFSET + len(_FTYP)
 
+_BYTES_PER_GIGABYTE = 1024 ** 3
+# Only published entries count against the budget and are eligible for
+# eviction: half-written temporaries carry a '.part' suffix, and anything else
+# in the directory belongs to whoever put it there.
+_ENTRY_GLOB = "*.mp4"
+
 
 class CachingYouTubeProxy(IYouTubeProxy):
     """Serve background clips from disk, hitting YouTube only on a miss.
@@ -56,6 +62,7 @@ class CachingYouTubeProxy(IYouTubeProxy):
 
         cached = self._read_entry(path)
         if cached is not None:
+            self._touch(path)
             self._hits += 1
             logger.info(
                 "Background cache hit for %s (%s) — %d hits / %d misses this run",
@@ -138,6 +145,71 @@ class CachingYouTubeProxy(IYouTubeProxy):
             )
             if tmp_path is not None:
                 self._discard(Path(tmp_path))
+            return
+
+        self._evict_until_within_budget()
+
+    def _touch(self, path: Path) -> None:
+        """Mark the entry as used, which is what the LRU order reads."""
+        try:
+            os.utime(path, None)
+        except OSError as e:
+            # An entry we cannot touch just looks older than it is; the clip was
+            # still served, so this is not worth failing a run over.
+            logger.warning(
+                "Could not refresh the last-used time of %s (%s)", path, e
+            )
+
+    def _evict_until_within_budget(self) -> None:
+        """Drop the least recently used entries until the cache fits its cap.
+
+        Size and last-used time come straight from the filesystem, so there is no
+        index to keep in sync: whatever is on disk is the truth, even after a run
+        was killed mid-download or a second machine wrote to the same directory.
+        """
+        budget = self._cache.max_gigabytes * _BYTES_PER_GIGABYTE
+        entries = []
+        total = 0
+        try:
+            for entry in self._dir.glob(_ENTRY_GLOB):
+                try:
+                    stat = entry.stat()
+                except FileNotFoundError:
+                    continue  # a concurrent run evicted it; nothing to account for
+                entries.append((stat.st_mtime, entry.name, entry, stat.st_size))
+                total += stat.st_size
+        except OSError as e:
+            logger.warning(
+                "Could not measure the background cache in %s (%s); "
+                "leaving it as it is",
+                self._dir, e,
+            )
+            return
+
+        if total <= budget:
+            return
+
+        for _, _, entry, size in sorted(entries, key=lambda e: (e[0], e[1])):
+            if total <= budget:
+                break
+            try:
+                entry.unlink()
+            except FileNotFoundError:
+                pass  # already gone, and gone is what we wanted
+            except OSError as e:
+                logger.warning(
+                    "Could not evict cached clip %s (%s); "
+                    "the cache stays above its budget",
+                    entry, e,
+                )
+                continue
+            else:
+                logger.info(
+                    "Evicted %s (%d bytes) to keep the background cache "
+                    "under %g GB",
+                    entry.name, size, self._cache.max_gigabytes,
+                )
+            total -= size
 
     @staticmethod
     def _discard(path: Path) -> None:
