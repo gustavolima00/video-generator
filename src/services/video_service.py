@@ -10,6 +10,7 @@ from moviepy.video.fx import CrossFadeIn
 from PIL import Image, ImageFilter
 
 from ..proxies.interfaces import IYouTubeProxy
+from ..proxies.pytube_proxy import YouTubeRateLimitError
 from ..entities.configs.services.video import VideoConfig
 from ..entities.image_story import ImageStory
 
@@ -64,6 +65,16 @@ class VideoService:
                 )
                 new_video = video_clip.VideoClip(bytes=video_bytes)
                 duration = float(new_video.clip.duration or 0)
+            except YouTubeRateLimitError:
+                # Every remaining video would hit the same per-IP throttle, and
+                # the pool is ~150 ids across the configured channels — walking
+                # it here is what kept the block alive between runs.
+                logger.error(
+                    "Aborting compilation after %d clip(s): YouTube is "
+                    "rate-limiting this IP",
+                    len(downloaded_bytes),
+                )
+                raise
             except Exception:
                 logger.exception("Skipping unusable YouTube background %s", video_id)
                 continue
