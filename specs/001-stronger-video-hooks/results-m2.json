@@ -1,0 +1,149 @@
+{
+  "model": "moonshotai/kimi-k2.6",
+  "total": 6,
+  "all_checks_pass": false,
+  "by_path": [
+    "dspy_single",
+    "prompt_single"
+  ],
+  "by_lang": [
+    "en",
+    "pt-br"
+  ],
+  "results": [
+    {
+      "path": "prompt_single",
+      "lang": "pt-br",
+      "title": "Meu vizinho invadia minha vaga paga todo dia e me desafiou: 'o que você vai fazer?'",
+      "narrator_gender": "unknown",
+      "checks": {
+        "title_present": true,
+        "title_no_forbidden": true,
+        "script_not_start_title": true,
+        "script_no_marker_head": true,
+        "script_no_forbidden": true
+      },
+      "all_pass": true,
+      "heads": {
+        "script": "Eu alugo uma vaga no meu prédio e pago direitinho por ela, todo mês. S"
+      }
+    },
+    {
+      "path": "dspy_single",
+      "lang": "pt-br",
+      "title": "Meu vizinho começou a estacionar na minha vaga todos os dias e riu da minha cara quando eu reclamei",
+      "narrator_gender": "unknown",
+      "checks": {
+        "title_present": true,
+        "title_no_forbidden": true,
+        "script_not_start_title": true,
+        "script_no_marker_head": true,
+        "script_no_forbidden": true
+      },
+      "all_pass": true,
+      "heads": {
+        "script": "Eu alugo uma vaga no meu prédio e pago direitinho por ela, né. Aí cheg"
+      }
+    },
+    {
+      "path": "prompt_single",
+      "lang": "en",
+      "title": "My neighbor kept stealing my paid parking spot and dared me to stop him",
+      "narrator_gender": "unknown",
+      "checks": {
+        "title_present": true,
+        "title_no_forbidden": true,
+        "script_not_start_title": true,
+        "script_no_marker_head": true,
+        "script_no_forbidden": true
+      },
+      "all_pass": true,
+      "heads": {
+        "script": "So I pay extra every month for a reserved parking spot in my building,"
+      }
+    },
+    {
+      "path": "prompt_single",
+      "lang": "pt-br",
+      "title": "Meu chefe me cortou da apresentação pro CEO pra levar crédito pelo meu projeto de 3 meses",
+      "narrator_gender": "female",
+      "checks": {
+        "title_present": true,
+        "title_no_forbidden": true,
+        "script_not_start_title": true,
+        "script_no_marker_head": true,
+        "script_no_forbidden": true
+      },
+      "all_pass": true,
+      "heads": {
+        "script": "Eu passei três meses inteiros construindo um dashboard pro cliente. Os"
+      }
+    },
+    {
+      "path": "prompt_single",
+      "lang": "en",
+      "title": "My boss cut me from the CEO presentation to take credit for my 3-month project",
+      "narrator_gender": "female",
+      "checks": {
+        "title_present": true,
+        "title_no_forbidden": true,
+        "script_not_start_title": true,
+        "script_no_marker_head": true,
+        "script_no_forbidden": true
+      },
+      "all_pass": true,
+      "heads": {
+        "script": "I spent three straight months building this client dashboard, and all "
+      }
+    },
+    {
+      "path": "dspy_single",
+      "lang": "en",
+      "title": "My boss cut me from the CEO presentation to take credit for my 3-month project",
+      "narrator_gender": "female",
+      "checks": {
+        "title_present": true,
+        "title_no_forbidden": true,
+        "script_not_start_title": true,
+        "script_no_marker_head": true,
+        "script_no_forbidden": false
+      },
+      "all_pass": false,
+      "heads": {
+        "script": "I spent three months building this client dashboard that all the direc"
+      }
+    }
+  ],
+  "errors": [
+    {
+      "path": "dspy_two_part",
+      "lang": "pt-br",
+      "error": "'NoneType' object is not subscriptable"
+    },
+    {
+      "path": "dspy_single",
+      "lang": "en",
+      "error": "'NoneType' object is not subscriptable"
+    },
+    {
+      "path": "dspy_two_part",
+      "lang": "en",
+      "error": "'NoneType' object is not subscriptable"
+    },
+    {
+      "path": "dspy_single",
+      "lang": "pt-br",
+      "error": "'NoneType' object is not subscriptable"
+    },
+    {
+      "path": "dspy_two_part",
+      "lang": "pt-br",
+      "error": "'NoneType' object is not subscriptable"
+    },
+    {
+      "path": "dspy_two_part",
+      "lang": "en",
+      "error": "'NoneType' object is not subscriptable"
+    }
+  ]
+}
