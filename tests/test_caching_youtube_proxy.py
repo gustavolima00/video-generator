@@ -455,6 +455,10 @@ def test_eviction_tolerates_an_entry_another_run_already_removed(tmp_path, monke
     inner = FakeYouTubeProxy(payload=clip(CLIP_SIZE))
     proxy = build(tmp_path, inner, max_gigabytes=gb(CLIP_SIZE))
     asyncio.run(proxy.download_video("vanishedaa1"))
+    # Backdate it so it is unambiguously the least recently used one. Linux
+    # hands out a coarse cached clock, so two clips written microseconds apart
+    # share an mtime and the eviction order would fall back to the name.
+    set_age(tmp_path / "vanishedaa1-hq.mp4", 3600)
 
     original_unlink = Path.unlink
 
