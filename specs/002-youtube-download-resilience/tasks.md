@@ -307,7 +307,69 @@ acima são de artefato de apoio (comandos, referências cruzadas, uma pergunta e
 research), não de requisito. O checklist segue 16/16 e ganhou apenas uma nota registrando
 esta revisão pós-implementação.
 
-**Checkpoint**: ✅ Feature completa — os 3 milestones passaram seus gates e o polish fechou.
+### Verificação no servidor de produção (2026-08-26)
+
+Rodada a pedido do usuário, depois do polish, com a feature **deployada de fato**
+(`just deploy`, `video-bot.service` reiniciado no código novo). Fecha as lacunas que os
+gates locais não conseguiram fechar.
+
+**Bug real encontrado — só o servidor poderia pegá-lo**: `uv run --extra test pytest`
+no Linux deu **1 failed, 122 passed** —
+`test_eviction_tolerates_an_entry_another_run_already_removed` evictou o clipe errado.
+Causa medida no próprio servidor: no ext4 dele, arquivos escritos no mesmo tick do
+relógio recebem `st_mtime_ns` **idêntico** (o kernel serve um relógio grosseiro em
+cache), enquanto o APFS do macOS dá timestamps distintos em nanossegundos. Com mtimes
+iguais, a eviction caiu no desempate por nome e `survivorb22` ordena antes de
+`vanishedaa1`. **O comportamento de produção está correto** — downloads reais ficam
+segundos um do outro, então o mtime sempre os distingue; o teste é que assumia ordenação
+natural, ao contrário dos outros testes de ordem, que já usavam `set_age`. Corrigido com
+`set_age` explícito. Depois da correção o servidor dá **178 passed, 1 failed** — idêntico
+ao local, a falha sendo a mesma pré-existente do T001.
+
+**FR-007 e FR-013 observados em produção real** (journal do `video-bot.service`, 26/08):
+
+- 07:14:56 e 07:34:06 — miss logado com contadores, depois `429` real: o proxy desistiu
+  **sem tentar os outros clients** ("giving up on ... without trying the rest"). FR-013 ao
+  vivo, no pipeline de verdade, não em teste.
+- 07:43:40–07:43:59 — a mesma rodada passou e baixou **3 clipes reais** (65,5 MB), cada
+  miss logado com os contadores acumulados. Os logs de hit/miss do FR-007 são exatamente
+  o que o operador vê no journal.
+
+**SC-001 e SC-006 — finalmente medidos com rede real** (o que faltava desde o M1):
+
+- Baseline frio: **19,3 s** para os 3 clipes, tirado do journal do próprio bot
+  (07:43:40 → 07:43:59), rede real, sem simulação.
+- Rodada quente, instância nova de `CachingYouTubeProxy` sobre um `PyTubeProxy` **real**
+  instrumentado para gritar em qualquer download: **0,195 s** (0,010 / 0,010 / 0,008 s).
+- **SC-001: PASS** — 0 requisições de download, 3 hits / 0 misses, bytes idênticos aos do
+  disco nos três clipes (sha256 conferido).
+- **SC-006: PASS — 99,0% menos tempo** (19,3 s → 0,195 s), muito acima dos 80% exigidos.
+  65,5 MB servidos do disco em vez da rede.
+
+**po_token instalado no servidor** (par fornecido pelo usuário, gravado só no `.env`,
+modo 600, nunca em arquivo rastreado):
+
+- Wiring confirmado ponta a ponta: `.env` → `Secrets` (116 / 520 chars) → container →
+  factory → `PyTubeYouTubeConfig` → `PyTubeProxy`, com `CachingYouTubeProxy` por fora.
+- **O par chega ao corpo real da requisição do InnerTube**, byte a byte igual ao `.env`
+  (`context.client.visitorData` e `serviceIntegrityDimensions.poToken`) — verificado sem
+  gastar download.
+- **T5 ao vivo com token real**: o 429 trouxe a dica de expiração apontando
+  `docs/po-token.md`.
+- **Observação para a doc**: o client WEB do pytubefix 10.11.0 se identifica como
+  `2.20251021.01.00`, enquanto o token foi capturado de um navegador em
+  `2.20260824.10.00`. Não foi possível provar que essa defasagem atrapalha, mas é
+  candidata a explicar rejeições de token e vale registrar na renovação.
+
+**O que continua sem verificação**: a segunda metade do **SC-005** — que um po_token
+válido *faça um download passar*. O par estava configurado nas três tentativas (07:14 e
+07:34 tomaram 429; 07:43 passou), então **não dá para distinguir** se o sucesso das 07:43
+veio do token ou do fim da janela de throttle. O que está provado é que o token é
+transmitido corretamente; a atribuição do resultado, não. Também segue não verificada a
+leitura da doc por um operador humano do zero.
+
+**Checkpoint**: ✅ Feature completa — os 3 milestones passaram seus gates, o polish fechou
+e a verificação em produção confirmou SC-001 e SC-006 com rede real.
 
 ---
 

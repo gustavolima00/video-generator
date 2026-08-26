@@ -43,8 +43,14 @@ implementation surfaced were all in supporting artifacts (a stale command in qui
 wrong FR cross-reference in plan.md, one open question in research.md) — they are listed under
 the T020 evidence in [tasks.md](../tasks.md) and were marked in place, not folded into the spec.
 
-One measurable outcome is implemented but **not yet measured**: SC-006 (≥80% less time acquiring
-backgrounds with a warm cache). The verification gates ran with a local clip standing in for the
-network, because the IP was throttled (HTTP 429) throughout the implementation day, so the timings
-observed do not represent the real saving. This is an outstanding measurement on a healthy-network
-run, not a gap in the specification.
+**SC-006 has since been measured** (production server, 2026-08-26): 19.3s cold with a real network
+baseline taken from the bot's own journal, against 0.195s warm — a **99.0% reduction**, well past
+the 80% bar, with zero download requests on the repeat run (SC-001). Both are recorded under the
+server-verification section of [tasks.md](../tasks.md). The earlier gap — gates that used a local
+clip in place of the network because the IP was throttled — is closed.
+
+One item remains open, and it is an attribution problem rather than a specification gap: the second
+half of SC-005, that a *valid* po_token makes a download succeed. The token pair was configured for
+all three production attempts (two took 429, the third succeeded), so the success cannot be
+attributed to the token rather than to the throttle window expiring. What is proven is that the pair
+reaches YouTube's request body byte-for-byte.
