@@ -521,3 +521,38 @@ def test_cache_defaults_are_not_shared_between_configs():
 def test_cache_cap_must_be_positive():
     with pytest.raises(ValueError):
         BackgroundCacheConfig(max_gigabytes=0)
+
+
+# --- locally_available: what a throttled run can still be served -------------
+
+
+def test_locally_available_reports_only_what_is_on_disk(tmp_path):
+    proxy = build(tmp_path, FakeYouTubeProxy())
+    asyncio.run(proxy.download_video("abc123def45"))
+
+    assert proxy.locally_available(["abc123def45", "xyz987uvw65"]) == ["abc123def45"]
+
+
+def test_locally_available_keeps_the_order_it_was_given(tmp_path):
+    proxy = build(tmp_path, FakeYouTubeProxy())
+    for video_id in ("aaaaaaaaaa1", "bbbbbbbbbb2", "cccccccccc3"):
+        asyncio.run(proxy.download_video(video_id))
+
+    asked = ["cccccccccc3", "zzzzzzzzzz9", "aaaaaaaaaa1", "bbbbbbbbbb2"]
+    assert proxy.locally_available(asked) == [
+        "cccccccccc3", "aaaaaaaaaa1", "bbbbbbbbbb2",
+    ]
+
+
+def test_locally_available_separates_the_quality_tracks(tmp_path):
+    proxy = build(tmp_path, FakeYouTubeProxy())
+    asyncio.run(proxy.download_video("abc123def45", low_quality=False))
+
+    assert proxy.locally_available(["abc123def45"], low_quality=False) == ["abc123def45"]
+    assert proxy.locally_available(["abc123def45"], low_quality=True) == []
+
+
+def test_locally_available_is_empty_for_a_plain_proxy():
+    # The interface default: a proxy with no local store promises nothing,
+    # so the service falls back to nothing and the throttle still surfaces.
+    assert PyTubeProxy(config=PyTubeYouTubeConfig()).locally_available(["abc123def45"]) == []

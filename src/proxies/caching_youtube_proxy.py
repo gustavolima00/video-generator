@@ -80,6 +80,22 @@ class CachingYouTubeProxy(IYouTubeProxy):
         self._store_entry(path, data)
         return data
 
+    def locally_available(
+        self, video_ids: List[str], low_quality: bool = False
+    ) -> List[str]:
+        """Which of *video_ids* are already on disk, in the order given.
+
+        Only a cheap existence check: whether the bytes are actually usable is
+        settled by `download_video`, which falls back to a download when an
+        entry turns out to be broken. A caller that reached for this because
+        the network is gone gets one skipped clip rather than a wrong answer.
+        """
+        return [
+            video_id
+            for video_id in video_ids
+            if self._entry_path(video_id, low_quality).exists()
+        ]
+
     # --- internals ------------------------------------------------------
 
     @staticmethod

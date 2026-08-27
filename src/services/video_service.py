@@ -58,23 +58,34 @@ class VideoService:
         downloaded_bytes: List[bytes] = []
         total_duration = 0
 
-        for video_id in video_ids:
+        for index, video_id in enumerate(video_ids):
             try:
                 video_bytes = await self._youtube_proxy.download_video(
                     video_id, low_quality
                 )
                 new_video = video_clip.VideoClip(bytes=video_bytes)
                 duration = float(new_video.clip.duration or 0)
-            except YouTubeRateLimitError:
+            except YouTubeRateLimitError as throttled:
                 # Every remaining video would hit the same per-IP throttle, and
                 # the pool is ~150 ids across the configured channels — walking
-                # it here is what kept the block alive between runs.
+                # it here is what kept the block alive between runs. So stop
+                # asking the network, but finish the compilation from whatever
+                # is already on disk instead of throwing the run away: the
+                # backgrounds we hold are as good as the ones we cannot reach.
                 logger.error(
-                    "Aborting compilation after %d clip(s): YouTube is "
-                    "rate-limiting this IP",
+                    "YouTube is rate-limiting this IP after %d clip(s); "
+                    "finishing from locally available backgrounds only",
                     len(downloaded_bytes),
                 )
-                raise
+                return await self._finish_without_network(
+                    video=video,
+                    downloaded_bytes=downloaded_bytes,
+                    total_duration=total_duration,
+                    remaining_ids=video_ids[index + 1 :],
+                    min_duration=min_duration,
+                    low_quality=low_quality,
+                    throttle_error=throttled,
+                )
             except Exception:
                 logger.exception("Skipping unusable YouTube background %s", video_id)
                 continue
@@ -100,6 +111,81 @@ class VideoService:
                 f"Video compilation completed with {total_duration:.1f}s duration (all available videos used)"
             )
         return YouTubeCompilationResult(clip=video, downloaded_bytes=downloaded_bytes)
+
+    async def _finish_without_network(
+        self,
+        video: video_clip.VideoClip,
+        downloaded_bytes: List[bytes],
+        total_duration: float,
+        remaining_ids: List[str],
+        min_duration: int,
+        low_quality: bool,
+        throttle_error: YouTubeRateLimitError,
+    ) -> YouTubeCompilationResult:
+        """Top the compilation up from backgrounds already held locally.
+
+        Reached only once YouTube has refused us, so this must not make a
+        single further request. Anything the proxy reports as locally
+        available is fetched; anything that turns out not to be is skipped
+        rather than allowed to fail the run, because by this point a finished
+        video built from older backgrounds beats no video at all.
+        """
+        local_ids = self._youtube_proxy.locally_available(remaining_ids, low_quality)
+        if not local_ids:
+            logger.error(
+                "No locally available backgrounds to fall back on; "
+                "compilation has %.1fs of the %ds needed",
+                total_duration, min_duration,
+            )
+            raise throttle_error
+
+        logger.info(
+            "Falling back to %d locally available background(s)", len(local_ids)
+        )
+
+        for video_id in local_ids:
+            try:
+                video_bytes = await self._youtube_proxy.download_video(
+                    video_id, low_quality
+                )
+                new_video = video_clip.VideoClip(bytes=video_bytes)
+                duration = float(new_video.clip.duration or 0)
+            except YouTubeRateLimitError:
+                # The entry went away between the check and the read, so this
+                # one fell through to the network after all. Stop: every other
+                # local clip is still worth trying, but this id is not.
+                logger.warning(
+                    "Locally available background %s needed the network after "
+                    "all; skipping it", video_id,
+                )
+                continue
+            except Exception:
+                logger.exception("Skipping unusable YouTube background %s", video_id)
+                continue
+
+            if duration <= 0:
+                logger.warning("Skipping zero-duration YouTube background %s", video_id)
+                continue
+
+            downloaded_bytes.append(video_bytes)
+            new_video.apply_anti_fingerprint(self._video_config.anti_fingerprint)
+            video.concat(new_video)
+            total_duration += duration
+
+            if total_duration >= min_duration:
+                logger.info(
+                    "Compilation completed from local backgrounds despite the "
+                    "throttle (%.1fs)", total_duration,
+                )
+                return YouTubeCompilationResult(
+                    clip=video, downloaded_bytes=downloaded_bytes
+                )
+
+        logger.error(
+            "Local backgrounds were not enough: %.1fs of the %ds needed",
+            total_duration, min_duration,
+        )
+        raise throttle_error
 
     async def _list_youtube_compilation_video_ids(self) -> List[str]:
         channel_urls = self._youtube_channel_urls()

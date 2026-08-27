@@ -189,6 +189,17 @@ class IYouTubeProxy(ABC):
         """Download a YouTube video and return its bytes"""
         ...
 
+    def locally_available(
+        self, video_ids: List[str], low_quality: bool = False
+    ) -> List[str]:
+        """Which of *video_ids* can be served without going to the network.
+
+        Callers use this to keep working when YouTube is unreachable. An
+        implementation that always needs the network answers with nothing,
+        which is the default here, so a plain proxy behaves exactly as before.
+        """
+        return []
+
 
 class ICoverProxy(ABC):
     @abstractmethod
