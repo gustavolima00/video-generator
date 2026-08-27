@@ -33,9 +33,9 @@ proxies:
   speech_config:
     type: edge-tts
     # Multiplier applied on top of whatever rate the caller asks for, so this is
-    # the real narration speed (1.4 = edge-tts "+40%"). Note the speech log line
+    # the real narration speed (1.5 = edge-tts "+50%"). Note the speech log line
     # prints the caller's rate, not this one.
-    default_rate: 1.4
+    default_rate: 1.5
   transcription_config:
     model: base
     type: local
